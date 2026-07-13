@@ -28,6 +28,17 @@
     <string name="icon_import_done_add_only">已新增 %1$d 个应用图标</string>
     <string name="icon_import_staging_missing">导入缓存已失效，请重新选择文件</string>
     <string name="icon_import_nothing_selected">请至少勾选一个应用图标</string>
+    <string name="mask_import_title">导入遮罩层</string>
+    <string name="mask_import_summary">来源：%1$s（%2$s）\n找到 %3$d 层，其中已存在 %4$d 层；已勾选 %5$d 层</string>
+    <string name="mask_import_apply">导入选中层</string>
+    <string name="mask_import_from_pack">从图标包导入</string>
+    <string name="mask_import_tag_missing">未找到</string>
+    <string name="mask_import_failed_title">导入遮罩失败</string>
+    <string name="mask_import_none_found">该文件中未找到 iconback / iconmask / iconupon</string>
+    <string name="mask_import_success_title">遮罩已导入</string>
+    <string name="mask_import_success_summary">已写入 %1$d 个遮罩层</string>
+    <string name="mask_import_staging_missing">导入缓存已失效，请重新选择文件</string>
+    <string name="mask_import_nothing_selected">请至少勾选一个遮罩层</string>
     <string name="action_import_project">导入项目</string>
     <string name="action_edit_info">编辑信息</string>
     <string name="action_edit_icons">编辑图标</string>
@@ -150,6 +161,8 @@
     <string name="export_phase_failed">导出失败</string>
     <string name="export_close">关闭</string>
     <string name="export_close_success">完成</string>
+    <string name="export_copy_logs">复制日志</string>
+    <string name="export_copy_logs_done">日志已复制</string>
     <string name="export_apk_install_title">安装图标包</string>
     <string name="export_apk_install_summary">APK 已导出成功，是否现在安装？</string>
     <string name="export_apk_install_yes">安装</string>

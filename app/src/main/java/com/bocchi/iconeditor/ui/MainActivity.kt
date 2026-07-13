@@ -65,6 +65,7 @@ import com.bocchi.iconeditor.ui.component.ExportValidationDialog
 import com.bocchi.iconeditor.ui.component.IconImportConfirmDialog
 import com.bocchi.iconeditor.ui.component.MainBottomBar
 import com.bocchi.iconeditor.ui.component.MainNavigationRail
+import com.bocchi.iconeditor.ui.component.MaskLayerImportConfirmDialog
 import com.bocchi.iconeditor.ui.component.MessageDialog
 import com.bocchi.iconeditor.ui.component.RootPagerContent
 import com.bocchi.iconeditor.ui.component.Screen
@@ -249,6 +250,17 @@ private fun IconEditorApp(
                 )
             }
             viewModel.previewIconsFromPack(it)
+        }
+    }
+    val maskPackImportLauncher = rememberLauncherForActivityResult(OpenProjectDocument()) { uri ->
+        uri?.let {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    it,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
+            }
+            viewModel.previewMaskLayersFromPack(it)
         }
     }
     val mtzExportLauncher = rememberLauncherForActivityResult(
@@ -440,6 +452,9 @@ private fun IconEditorApp(
                                         onClearIconUpon = {
                                             viewModel.clearApkMaskLayer(ApkPackAssets.MaskLayer.Upon)
                                         },
+                                        onImportMaskFromPack = {
+                                            maskPackImportLauncher.launch(ProjectImportMimeTypes.toTypedArray())
+                                        },
                                     )
                                 }
                                 Screen.Icons -> SecondaryScene(
@@ -577,6 +592,15 @@ private fun IconEditorApp(
                     onDismiss = viewModel::dismissIconImportPreview,
                     onOverwrite = { viewModel.applyIconImport(IconImportMode.Overwrite) },
                     onAddOnly = { viewModel.applyIconImport(IconImportMode.AddOnly) },
+                )
+                MaskLayerImportConfirmDialog(
+                    preview = viewModel.maskLayerImportPreview,
+                    layerFile = viewModel::maskImportLayerFile,
+                    onToggle = viewModel::toggleMaskLayerImportSelection,
+                    onSelectAll = { viewModel.setAllMaskLayerImportSelection(true) },
+                    onSelectNone = { viewModel.setAllMaskLayerImportSelection(false) },
+                    onDismiss = viewModel::dismissMaskLayerImportPreview,
+                    onImport = viewModel::applyMaskLayerImport,
                 )
                 ImportProgressOverlay(progress = viewModel.importProgress)
                 ExportProgressOverlay(

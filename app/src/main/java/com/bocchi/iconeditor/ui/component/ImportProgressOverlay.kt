@@ -1,6 +1,10 @@
 package com.bocchi.iconeditor.ui.component
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Arrangement
@@ -10,7 +14,6 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -21,6 +24,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
@@ -64,6 +68,7 @@ fun ExportProgressOverlay(
         onDismiss = onDismiss,
         installUri = installUri.takeIf { progress.finished && progress.success },
         onInstall = onInstall,
+        allowCopyLogs = true,
     )
 }
 
@@ -78,11 +83,14 @@ private fun TaskProgressOverlay(
     onDismiss: (() -> Unit)? = null,
     installUri: Uri? = null,
     onInstall: ((Uri) -> Unit)? = null,
+    allowCopyLogs: Boolean = false,
 ) {
+    val context = LocalContext.current
     val logScrollState = rememberScrollState()
+    // 瞬时滚到底，避免 animateScrollTo 与频繁布局叠加导致抖动
     LaunchedEffect(logs.size, logs.lastOrNull()) {
         if (logs.isNotEmpty()) {
-            logScrollState.animateScrollTo(logScrollState.maxValue)
+            logScrollState.scrollTo(logScrollState.maxValue)
         }
     }
     Box(
@@ -100,74 +108,121 @@ private fun TaskProgressOverlay(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text(title)
-            if (!detail.isNullOrBlank()) {
-                Text(
-                    text = detail,
-                    fontSize = 13.sp,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    maxLines = if (finished) 6 else 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            if (finished && success && installUri != null && onInstall != null) {
-                Text(
-                    text = stringResource(R.string.export_apk_install_summary),
-                    fontSize = 13.sp,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                )
+            Text(
+                text = title,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            // 固定详情区高度，避免 detail 变长时整窗上移
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(if (allowCopyLogs) 36.dp else if (!detail.isNullOrBlank()) 36.dp else 0.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (!detail.isNullOrBlank()) {
+                    Text(
+                        text = detail,
+                        fontSize = 13.sp,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
             ImportProgressBar(fraction = fraction)
             Text(
                 text = "${(fraction * 100).toInt()}%",
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             )
-            if (logs.isNotEmpty()) {
+            if (allowCopyLogs || logs.isNotEmpty()) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(max = 200.dp)
+                        .height(180.dp)
                         .clip(RoundedCornerShape(8.dp))
                         .background(MiuixTheme.colorScheme.surfaceContainerHigh)
                         .verticalScroll(logScrollState)
                         .padding(horizontal = 10.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    logs.takeLast(48).forEach { line ->
+                    if (logs.isEmpty()) {
                         Text(
-                            text = line,
+                            text = "…",
                             fontSize = 11.sp,
                             lineHeight = 14.sp,
                             fontFamily = FontFamily.Monospace,
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.45f),
                         )
+                    } else {
+                        logs.takeLast(48).forEach { line ->
+                            Text(
+                                text = line,
+                                fontSize = 11.sp,
+                                lineHeight = 14.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            )
+                        }
                     }
                 }
             }
-            if (finished && onDismiss != null) {
-                if (success && installUri != null && onInstall != null) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        Button(
-                            modifier = Modifier.weight(1f),
-                            onClick = onDismiss,
+            if (allowCopyLogs) {
+                Button(
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = logs.isNotEmpty(),
+                    onClick = {
+                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        clipboard.setPrimaryClip(
+                            ClipData.newPlainText("export-log", logs.joinToString("\n")),
+                        )
+                        Toast.makeText(
+                            context,
+                            context.getString(R.string.export_copy_logs_done),
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                    },
+                ) {
+                    Text(stringResource(R.string.export_copy_logs))
+                }
+            }
+            // 结束按钮区预留固定高度，避免完成后突然增高导致居中抖动
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(if (allowCopyLogs) 88.dp else if (finished && onDismiss != null) 48.dp else 0.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (finished && success && installUri != null && onInstall != null) {
+                    Text(
+                        text = stringResource(R.string.export_apk_install_summary),
+                        fontSize = 13.sp,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                if (finished && onDismiss != null) {
+                    if (success && installUri != null && onInstall != null) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
-                            Text(stringResource(R.string.export_apk_install_no))
+                            Button(
+                                modifier = Modifier.weight(1f),
+                                onClick = onDismiss,
+                            ) {
+                                Text(stringResource(R.string.export_apk_install_no))
+                            }
+                            Button(
+                                modifier = Modifier.weight(1f),
+                                onClick = { onInstall(installUri) },
+                            ) {
+                                Text(stringResource(R.string.export_apk_install_yes))
+                            }
                         }
-                        Button(
-                            modifier = Modifier.weight(1f),
-                            onClick = { onInstall(installUri) },
-                        ) {
-                            Text(stringResource(R.string.export_apk_install_yes))
-                        }
-                    }
-                } else {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.Center,
-                    ) {
+                    } else {
                         Button(onClick = onDismiss) {
                             Text(
                                 text = if (success) {

@@ -22,6 +22,8 @@ import java.util.zip.ZipFile
 
 class InvalidIconPackApkException : IllegalArgumentException()
 
+class NoMaskLayersFoundException : IllegalArgumentException()
+
 data class ApkImportResult(
     val metadata: ProjectMetadata,
     val mapping: IconMappingIndex,

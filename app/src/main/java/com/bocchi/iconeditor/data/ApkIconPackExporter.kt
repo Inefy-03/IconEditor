@@ -26,7 +26,20 @@ class ApkIconPackExporter(private val context: Context) {
             reporter.log("忽略源 APK 结构，使用 aapt2 标准流程重建：${sourceApk.name}")
         }
         reporter.log("生成 appfilter.xml（${mapping.entries.size} 条映射）")
-        val appfilter = IconMappingBridge.buildAppfilterXml(mapping.entries)
+        val presentMaskLayers = ApkPackAssets.MaskLayer.entries
+            .filter { File(workDir, it.relativePath).isFile }
+            .map { it.resourceName }
+        if (presentMaskLayers.isNotEmpty()) {
+            reporter.log("声明遮罩层：${presentMaskLayers.joinToString(", ")}")
+            reporter.log("appfilter 使用 <iconback/iconmask/iconupon img1=\"...\"/> 格式")
+            reporter.log("提示：遮罩只作用于包内未单独适配的应用（桌面仍显示系统图标的那些）")
+        } else {
+            reporter.log("未找到 iconback/iconmask/iconupon，跳过遮罩声明")
+        }
+        val appfilter = IconMappingBridge.buildAppfilterXml(
+            mappings = mapping.entries,
+            maskLayerDrawables = presentMaskLayers,
+        )
         val drawableXml = IconMappingBridge.buildDrawableXml(mapping.entries)
         val packableEntries = mapping.entries.filter { it.drawableName.isNotBlank() }
 

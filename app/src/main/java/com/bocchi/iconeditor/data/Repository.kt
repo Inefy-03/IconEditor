@@ -14,6 +14,8 @@ import com.bocchi.iconeditor.model.IconAsset
 import com.bocchi.iconeditor.model.IconImportCandidate
 import com.bocchi.iconeditor.model.IconImportMode
 import com.bocchi.iconeditor.model.IconImportPreview
+import com.bocchi.iconeditor.model.MaskLayerImportCandidate
+import com.bocchi.iconeditor.model.MaskLayerImportPreview
 import com.bocchi.iconeditor.model.IconMappingIndex
 import com.bocchi.iconeditor.model.IconPreferences
 import com.bocchi.iconeditor.model.ProjectIndex
@@ -37,6 +39,7 @@ class ProjectRepository(private val context: Context) {
     }
     private val apkImporter = ApkIconPackImporter(context)
     private val apkExporter = ApkIconPackExporter(context)
+    private val maskLayerExtractor = MaskLayerExtractor(context)
 
     private val root: File = File(context.filesDir, "projects")
     private val indexFile: File = File(root, "index.json")
@@ -455,6 +458,117 @@ class ProjectRepository(private val context: Context) {
         runCatching { iconImportStagingRoot(stagingId).deleteRecursively() }
     }
 
+    fun previewMaskLayersFromPack(
+        projectId: String,
+        uri: Uri,
+        onProgress: (ImportProgress) -> Unit = {},
+    ): MaskLayerImportPreview {
+        requireProject(projectId)
+        onProgress(ImportProgress(ImportPhase.Copying))
+        val displayName = ImportSourceDetector.resolveDisplayName(context, uri)
+        val sourceType = ImportSourceDetector.detect(context, uri, displayName)
+        val stagingId = UUID.randomUUID().toString()
+        val stagingRoot = maskImportStagingRoot(stagingId).also { it.mkdirs() }
+        return try {
+            val sourceFile = File(stagingRoot, displayName)
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                sourceFile.outputStream().use { output -> input.copyTo(output) }
+            } ?: error(context.getString(R.string.error_read_import))
+
+            val layersDir = File(stagingRoot, "layers").also { it.mkdirs() }
+            onProgress(ImportProgress(ImportPhase.Extracting))
+            val extracted = when (sourceType) {
+                SourceType.Apk -> maskLayerExtractor.extractFromApk(sourceFile, layersDir)
+                SourceType.Module -> {
+                    if (!ArchiveService.hasTopLevelIconsEntry(sourceFile)) {
+                        throw InvalidProjectArchiveException()
+                    }
+                    val stagingWork = File(stagingRoot, "work")
+                    val stagingExtract = File(stagingRoot, "extract")
+                    try {
+                        ArchiveService.importArchive(sourceFile, sourceType, stagingWork, stagingExtract)
+                    } catch (error: InvalidArchivePathException) {
+                        error(context.getString(R.string.error_invalid_zip_path, error.entryName))
+                    }
+                    maskLayerExtractor.extractFromWorkDir(stagingWork, layersDir)
+                }
+                SourceType.Mtz -> {
+                    val stagingWork = File(stagingRoot, "work")
+                    val stagingExtract = File(stagingRoot, "extract")
+                    try {
+                        ArchiveService.importArchive(sourceFile, sourceType, stagingWork, stagingExtract)
+                    } catch (error: InvalidArchivePathException) {
+                        error(context.getString(R.string.error_invalid_zip_path, error.entryName))
+                    }
+                    maskLayerExtractor.extractFromWorkDir(stagingWork, layersDir)
+                }
+                SourceType.Universal -> error(context.getString(R.string.error_read_import))
+            }
+            if (extracted.isEmpty()) {
+                throw NoMaskLayersFoundException()
+            }
+            onProgress(ImportProgress(ImportPhase.Finishing))
+            val items = ApkPackAssets.MaskLayer.entries.map { layer ->
+                val found = layer in extracted
+                MaskLayerImportCandidate(
+                    layerName = layer.resourceName,
+                    found = found,
+                    conflict = found && apkMaskLayerFile(projectId, layer) != null,
+                    selected = found,
+                )
+            }
+            MaskLayerImportPreview(
+                stagingId = stagingId,
+                sourceType = sourceType,
+                displayName = displayName,
+                items = items,
+            )
+        } catch (error: Throwable) {
+            discardMaskImportStaging(stagingId)
+            throw error
+        }
+    }
+
+    fun applyMaskLayerImport(
+        projectId: String,
+        preview: MaskLayerImportPreview,
+        selectedLayers: Set<String>,
+        onProgress: (ImportProgress) -> Unit = {},
+    ) {
+        requireProject(projectId)
+        val layersDir = File(maskImportStagingRoot(preview.stagingId), "layers")
+        if (!layersDir.isDirectory) {
+            error(context.getString(R.string.mask_import_staging_missing))
+        }
+        onProgress(ImportProgress(ImportPhase.Copying))
+        var imported = 0
+        ApkPackAssets.MaskLayer.entries.forEach { layer ->
+            if (layer.resourceName !in selectedLayers) return@forEach
+            val source = File(layersDir, "${layer.resourceName}.png")
+            if (!source.isFile) return@forEach
+            val target = File(workDir(projectId), layer.relativePath)
+            target.parentFile?.mkdirs()
+            source.copyTo(target, overwrite = true)
+            if (layer == ApkPackAssets.MaskLayer.Mask) {
+                File(workDir(projectId), ApkPackAssets.LEGACY_MASK_PATH).delete()
+            }
+            imported++
+        }
+        if (imported == 0) {
+            error(context.getString(R.string.mask_import_nothing_selected))
+        }
+        markDirty(projectId)
+        onProgress(ImportProgress(ImportPhase.Finishing))
+        discardMaskImportStaging(preview.stagingId)
+    }
+
+    fun maskImportLayerFile(stagingId: String, layerName: String): File? =
+        File(maskImportStagingRoot(stagingId), "layers/$layerName.png").takeIf { it.isFile }
+
+    fun discardMaskImportStaging(stagingId: String) {
+        runCatching { maskImportStagingRoot(stagingId).deleteRecursively() }
+    }
+
     fun exportProject(
         id: String,
         format: ExportFormat,
@@ -635,6 +749,7 @@ class ProjectRepository(private val context: Context) {
     private fun preferencesFile(id: String) = File(projectDir(id), "preferences.json")
     private fun iconMappingFile(id: String) = File(projectDir(id), "icon_mapping.json")
     private fun iconImportStagingRoot(stagingId: String) = File(context.cacheDir, "icon-import/$stagingId")
+    private fun maskImportStagingRoot(stagingId: String) = File(context.cacheDir, "mask-import/$stagingId")
     private fun stagedMappingFile(stagingId: String) = File(iconImportStagingRoot(stagingId), "mapping.json")
 
     private fun saveStagedMapping(stagingId: String, mapping: IconMappingIndex) {

@@ -68,6 +68,7 @@ fun InfoEditPage(
     onClearIconMask: () -> Unit = {},
     onPickIconUpon: () -> Unit = {},
     onClearIconUpon: () -> Unit = {},
+    onImportMaskFromPack: () -> Unit = {},
 ) {
     val pagePadding = contentPadding.withPageMargins(horizontal = 16.dp)
     AnimatedContent(
@@ -107,6 +108,7 @@ fun InfoEditPage(
                 onClearIconMask = onClearIconMask,
                 onPickIconUpon = onPickIconUpon,
                 onClearIconUpon = onClearIconUpon,
+                onImportMaskFromPack = onImportMaskFromPack,
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = pagePadding,
             )
@@ -185,6 +187,7 @@ fun ApkInfoForm(
     onClearIconMask: () -> Unit = {},
     onPickIconUpon: () -> Unit = {},
     onClearIconUpon: () -> Unit = {},
+    onImportMaskFromPack: () -> Unit = {},
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(),
 ) {
@@ -216,6 +219,7 @@ fun ApkInfoForm(
                 onClearIconMask = onClearIconMask,
                 onPickIconUpon = onPickIconUpon,
                 onClearIconUpon = onClearIconUpon,
+                onImportFromPack = onImportMaskFromPack,
             )
         }
         item { LabeledField("package", info.packageName) { onChange(info.copy(packageName = it)) } }
@@ -241,12 +245,25 @@ private fun MaskLayersEditor(
     onClearIconMask: () -> Unit,
     onPickIconUpon: () -> Unit,
     onClearIconUpon: () -> Unit,
+    onImportFromPack: () -> Unit = {},
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(
-            text = stringResource(R.string.apk_mask_layers),
-            style = MiuixTheme.textStyles.subtitle,
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(
+                text = stringResource(R.string.apk_mask_layers),
+                style = MiuixTheme.textStyles.subtitle,
+            )
+            Text(
+                text = stringResource(R.string.mask_import_from_pack),
+                style = MiuixTheme.textStyles.footnote1,
+                color = MiuixTheme.colorScheme.primary,
+                modifier = Modifier.clickable(onClick = onImportFromPack),
+            )
+        }
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),

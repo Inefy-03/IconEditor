@@ -13,6 +13,7 @@ import com.bocchi.iconeditor.R
 import com.bocchi.iconeditor.data.ApkPackAssets
 import com.bocchi.iconeditor.data.InvalidIconPackApkException
 import com.bocchi.iconeditor.data.InvalidProjectArchiveException
+import com.bocchi.iconeditor.data.NoMaskLayersFoundException
 import com.bocchi.iconeditor.data.ProjectRepository
 import com.bocchi.iconeditor.data.packagename.PackageNameRepository
 import com.bocchi.iconeditor.model.ApkInfo
@@ -24,6 +25,8 @@ import com.bocchi.iconeditor.model.IconAsset
 import com.bocchi.iconeditor.model.IconImportCandidate
 import com.bocchi.iconeditor.model.IconImportMode
 import com.bocchi.iconeditor.model.IconImportPreview
+import com.bocchi.iconeditor.model.MaskLayerImportCandidate
+import com.bocchi.iconeditor.model.MaskLayerImportPreview
 import com.bocchi.iconeditor.model.IconListItem
 import com.bocchi.iconeditor.model.IconPreferences
 import com.bocchi.iconeditor.model.ImportProgress
@@ -75,6 +78,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     var importProgress by mutableStateOf<ImportProgress?>(null)
         private set
     var iconImportPreview by mutableStateOf<IconImportPreview?>(null)
+        private set
+    var maskLayerImportPreview by mutableStateOf<MaskLayerImportPreview?>(null)
         private set
     var isExporting by mutableStateOf(false)
         private set
@@ -267,10 +272,146 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
-    fun iconImportCandidateFile(candidate: IconImportCandidate): java.io.File? {
+    fun iconImportCandidateFile(candidate: IconImportCandidate): File? {
         val preview = iconImportPreview ?: return null
         return repository.iconImportCandidateFile(preview.stagingId, candidate.iconArchivePath)
             .takeIf { it.isFile }
+    }
+
+    fun previewMaskLayersFromPack(uri: Uri) {
+        val projectId = selectedProjectId ?: return
+        viewModelScope.launch {
+            initializationJob.join()
+            maskLayerImportPreview?.let { discard ->
+                withContext(Dispatchers.IO) {
+                    repository.discardMaskImportStaging(discard.stagingId)
+                }
+            }
+            maskLayerImportPreview = null
+            isImporting = true
+            importProgress = ImportProgress(com.bocchi.iconeditor.model.ImportPhase.Copying)
+            val progressChannel = Channel<ImportProgress>(Channel.CONFLATED)
+            val progressCollector = launch(Dispatchers.Main.immediate) {
+                for (progress in progressChannel) {
+                    importProgress = progress
+                }
+            }
+            runCatching {
+                val preview = withContext(Dispatchers.IO) {
+                    repository.previewMaskLayersFromPack(projectId, uri) { progress ->
+                        progressChannel.trySend(progress)
+                    }
+                }
+                maskLayerImportPreview = preview
+            }.onFailure { error ->
+                if (error is CancellationException) throw error
+                when (error) {
+                    is NoMaskLayersFoundException -> showMessage(
+                        R.string.mask_import_failed_title,
+                        getApplication<Application>().getString(R.string.mask_import_none_found),
+                    )
+                    is InvalidProjectArchiveException, is InvalidIconPackApkException -> showMessage(
+                        R.string.import_failed_title,
+                        getApplication<Application>().getString(R.string.import_invalid_file),
+                    )
+                    else -> showError(error)
+                }
+            }
+            progressChannel.close()
+            progressCollector.join()
+            isImporting = false
+            importProgress = null
+        }
+    }
+
+    fun dismissMaskLayerImportPreview() {
+        val preview = maskLayerImportPreview
+        maskLayerImportPreview = null
+        if (preview != null) {
+            viewModelScope.launch(Dispatchers.IO) {
+                repository.discardMaskImportStaging(preview.stagingId)
+            }
+        }
+    }
+
+    fun toggleMaskLayerImportSelection(layerName: String) {
+        val preview = maskLayerImportPreview ?: return
+        maskLayerImportPreview = preview.copy(
+            items = preview.items.map { item ->
+                if (item.layerName == layerName && item.found) {
+                    item.copy(selected = !item.selected)
+                } else {
+                    item
+                }
+            },
+        )
+    }
+
+    fun setAllMaskLayerImportSelection(selected: Boolean) {
+        val preview = maskLayerImportPreview ?: return
+        maskLayerImportPreview = preview.copy(
+            items = preview.items.map { item ->
+                if (item.found) item.copy(selected = selected) else item
+            },
+        )
+    }
+
+    fun applyMaskLayerImport() {
+        val projectId = selectedProjectId ?: return
+        val preview = maskLayerImportPreview ?: return
+        val selected = preview.items.filter { it.selected && it.found }.map { it.layerName }.toSet()
+        if (selected.isEmpty()) {
+            showMessage(
+                R.string.dialog_notice,
+                getApplication<Application>().getString(R.string.mask_import_nothing_selected),
+            )
+            return
+        }
+        maskLayerImportPreview = null
+        viewModelScope.launch {
+            isImporting = true
+            importProgress = ImportProgress(com.bocchi.iconeditor.model.ImportPhase.Copying)
+            val progressChannel = Channel<ImportProgress>(Channel.CONFLATED)
+            val progressCollector = launch(Dispatchers.Main.immediate) {
+                for (progress in progressChannel) {
+                    importProgress = progress
+                }
+            }
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    repository.applyMaskLayerImport(
+                        projectId = projectId,
+                        preview = preview,
+                        selectedLayers = selected,
+                    ) { progress ->
+                        progressChannel.trySend(progress)
+                    }
+                }
+                apkAssetsRevision++
+                refresh()
+                showMessage(
+                    R.string.mask_import_success_title,
+                    getApplication<Application>().getString(
+                        R.string.mask_import_success_summary,
+                        selected.size,
+                    ),
+                )
+            }.onFailure { error ->
+                if (error is CancellationException) throw error
+                repository.discardMaskImportStaging(preview.stagingId)
+                showError(error)
+            }
+            progressChannel.close()
+            progressCollector.join()
+            isImporting = false
+            importProgress = null
+        }
+    }
+
+    fun maskImportLayerFile(item: MaskLayerImportCandidate): File? {
+        val preview = maskLayerImportPreview ?: return null
+        if (!item.found) return null
+        return repository.maskImportLayerFile(preview.stagingId, item.layerName)
     }
 
     fun applyIconImport(mode: IconImportMode) {

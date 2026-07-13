@@ -28,6 +28,17 @@
     <string name="icon_import_done_add_only">Added %1$d new app icons</string>
     <string name="icon_import_staging_missing">Import cache expired. Please pick the file again</string>
     <string name="icon_import_nothing_selected">Select at least one app icon</string>
+    <string name="mask_import_title">Import mask layers</string>
+    <string name="mask_import_summary">Source: %1$s (%2$s)\nFound %3$d layer(s), %4$d already present; %5$d selected</string>
+    <string name="mask_import_apply">Import selected</string>
+    <string name="mask_import_from_pack">Import from pack</string>
+    <string name="mask_import_tag_missing">Missing</string>
+    <string name="mask_import_failed_title">Mask import failed</string>
+    <string name="mask_import_none_found">No iconback / iconmask / iconupon found in this file</string>
+    <string name="mask_import_success_title">Masks imported</string>
+    <string name="mask_import_success_summary">Wrote %1$d mask layer(s)</string>
+    <string name="mask_import_staging_missing">Import cache expired. Please pick the file again</string>
+    <string name="mask_import_nothing_selected">Select at least one mask layer</string>
     <string name="action_import_project">Import project</string>
     <string name="action_edit_info">Edit information</string>
     <string name="action_edit_icons">Edit icons</string>
@@ -151,6 +162,8 @@
     <string name="export_phase_failed">Export failed</string>
     <string name="export_close">Close</string>
     <string name="export_close_success">Done</string>
+    <string name="export_copy_logs">Copy log</string>
+    <string name="export_copy_logs_done">Log copied</string>
     <string name="export_apk_install_title">Install icon pack</string>
     <string name="export_apk_install_summary">APK exported successfully. Install it now?</string>
     <string name="export_apk_install_yes">Install</string>

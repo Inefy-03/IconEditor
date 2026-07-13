@@ -27,12 +27,31 @@ class IconMappingBridgeTest {
     }
 
     @Test
-    fun generateApkDrawableNameIsStableAndNotPackageDerived() {
+    fun generateApkDrawableNameUsesPackageReadableName() {
         val first = IconMappingBridge.generateApkDrawableName("com.tencent.mm", mutableSetOf())
         val second = IconMappingBridge.generateApkDrawableName("com.tencent.mm", mutableSetOf())
+        assertEquals("com_tencent_mm", first)
         assertEquals(first, second)
-        assertFalse(IconMappingBridge.isPackageDerivedDrawableName(first, "com.tencent.mm"))
-        assertTrue(first.matches(Regex("i[0-9a-f]{8}")))
+        assertTrue(IconMappingBridge.isPackageDerivedDrawableName(first, "com.tencent.mm"))
+        assertFalse(IconMappingBridge.isLegacyHashedDrawableName(first))
+        assertTrue(IconMappingBridge.isLegacyHashedDrawableName("i3a5f2b1c"))
+    }
+
+    @Test
+    fun buildAppfilterXmlDeclaresMaskLayers() {
+        val xml = IconMappingBridge.buildAppfilterXml(
+            mappings = emptyList(),
+            maskLayerDrawables = listOf("iconback", "iconmask", "iconupon"),
+        )
+        assertTrue(xml.contains("<iconback"))
+        assertTrue(xml.contains("""img1="iconback""""))
+        assertTrue(xml.contains("<iconmask"))
+        assertTrue(xml.contains("""img1="iconmask""""))
+        assertTrue(xml.contains("<iconupon"))
+        assertTrue(xml.contains("""img1="iconupon""""))
+        assertTrue(xml.contains("<scale"))
+        assertTrue(xml.contains("""factor="1""""))
+        assertFalse(xml.contains("""component="iconback""""))
     }
 
     @Test

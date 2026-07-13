@@ -7,7 +7,6 @@ import com.bocchi.iconeditor.model.IconAsset
 import com.bocchi.iconeditor.model.IconMappingEntry
 import com.bocchi.iconeditor.model.IconMappingIndex
 import java.io.File
-import java.security.MessageDigest
 import org.w3c.dom.Document
 import org.w3c.dom.Element
 import java.io.InputStream
@@ -29,6 +28,8 @@ data class DedupedMapping(
 )
 
 object IconMappingBridge {
+    const val DEFAULT_ICON_PACK_SCALE = "1"
+
     private val componentRegex = Regex(
         """ComponentInfo\{([^/}]+)/([^}]+)\}""",
     )
@@ -57,16 +58,23 @@ object IconMappingBridge {
     }
 
     fun generateApkDrawableName(packageName: String, used: MutableSet<String>): String {
-        val digest = MessageDigest.getInstance("SHA-256").digest(packageName.toByteArray(Charsets.UTF_8))
-        val code = digest.take(4).joinToString("") { "%02x".format(it) }
-        var candidate = "i$code"
-        var suffix = 0
-        while (candidate in used) {
-            candidate = "i$code$suffix"
-            suffix++
+        var candidate = packageToDrawableName(packageName).ifBlank { "icon" }
+        if (candidate.firstOrNull()?.isDigit() == true) {
+            candidate = "_$candidate"
         }
-        used += candidate
-        return candidate
+        var name = candidate
+        var suffix = 0
+        while (name in used) {
+            suffix++
+            name = "${candidate}_$suffix"
+        }
+        used += name
+        return name
+    }
+
+    /** 旧版导出用的短哈希名（如 i3a5f2b1c），导出时应改回可读包名资源名。 */
+    fun isLegacyHashedDrawableName(drawableName: String): Boolean {
+        return drawableName.matches(Regex("""^i[0-9a-f]{8}(_\d+)?$"""))
     }
 
     fun prepareApkExportMapping(
@@ -81,7 +89,7 @@ object IconMappingBridge {
         } else {
             mergeMappingsWithIcons(existing, icons, pm)
         }
-        val usedDrawables = mutableSetOf<String>()
+        val usedDrawables = ApkPackAssets.MaskLayer.resourceNames.toMutableSet()
         return IconMappingIndex(
             entries = merged.entries.map { entry ->
                 val drawableName = resolveApkDrawableName(entry.packageName, entry.drawableName, usedDrawables)
@@ -95,7 +103,11 @@ object IconMappingBridge {
         existingDrawable: String,
         used: MutableSet<String>,
     ): String {
-        if (!isPackageDerivedDrawableName(existingDrawable, packageName)) {
+        if (
+            existingDrawable.isNotBlank() &&
+            !isPackageDerivedDrawableName(existingDrawable, packageName) &&
+            !isLegacyHashedDrawableName(existingDrawable)
+        ) {
             used += existingDrawable
             return existingDrawable
         }
@@ -230,10 +242,33 @@ object IconMappingBridge {
         return IconMappingIndex(entries = merged.values.sortedBy { it.packageName })
     }
 
-    fun buildAppfilterXml(mappings: List<IconMappingEntry>): String {
+    fun buildAppfilterXml(
+        mappings: List<IconMappingEntry>,
+        maskLayerDrawables: Collection<String> = emptyList(),
+        scale: String? = DEFAULT_ICON_PACK_SCALE,
+    ): String {
         val doc = DocumentBuilderFactory.newInstance().newDocumentBuilder().newDocument()
         val root = doc.createElement("resources")
         doc.appendChild(root)
+        // Nova / Apex / Lawnchair 标准（见 Example_NovaTheme）：
+        //   <iconback img1="iconback" />
+        //   <iconmask img1="iconmask" />
+        //   <iconupon img1="iconupon" />
+        //   <scale factor="1" />
+        // 错误写法 <item component="iconback" drawable="..."/> 不会被识别。
+        val layers = maskLayerDrawables.map { it.trim() }.filter { it.isNotBlank() }.toSet()
+        listOf("iconback", "iconmask", "iconupon").forEach { tag ->
+            if (tag in layers) {
+                val element = doc.createElement(tag)
+                element.setAttribute("img1", tag)
+                root.appendChild(element)
+            }
+        }
+        if (layers.isNotEmpty() && !scale.isNullOrBlank()) {
+            val scaleItem = doc.createElement("scale")
+            scaleItem.setAttribute("factor", scale)
+            root.appendChild(scaleItem)
+        }
         mappings.forEach { mapping ->
             if (mapping.drawableName.isBlank()) return@forEach
             mapping.components.forEach { component ->

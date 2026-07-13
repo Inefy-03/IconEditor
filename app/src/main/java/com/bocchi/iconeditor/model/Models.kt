@@ -174,6 +174,24 @@ data class IconImportPreview(
     val selectedNewCount: Int get() = items.count { it.selected && !it.conflict }
 }
 
+data class MaskLayerImportCandidate(
+    val layerName: String,
+    val found: Boolean,
+    val conflict: Boolean,
+    val selected: Boolean = true,
+)
+
+data class MaskLayerImportPreview(
+    val stagingId: String,
+    val sourceType: SourceType,
+    val displayName: String,
+    val items: List<MaskLayerImportCandidate>,
+) {
+    val foundCount: Int get() = items.count { it.found }
+    val conflictCount: Int get() = items.count { it.found && it.conflict }
+    val selectedCount: Int get() = items.count { it.selected && it.found }
+}
+
 @Serializable
 data class IconPreferences(
     val search: String = "",
