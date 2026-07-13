@@ -1,0 +1,32 @@
+.gradle/
+.idea/
+.kotlin/
+build/
+*/build/
+local.properties
+*.iml
+.DS_Store
+captures/
+*.apk
+*.aab
+*.ap_
+*.keystore
+*.jks
+keystore.properties
+
+# Keep only user-facing README documents in the repository.
+*.md
+!README.md
+!README.en.md
+
+# Local package-name source data and maintenance tools.
+packages_name_database.json
+app/src/main/assets/packages_name_database.json
+tools/generate_package_name_database.py
+tools/merge_package_name_sources.py
+
+# Local Python tooling artifacts.
+__pycache__/
+*.py[cod]
+.venv/
+venv/

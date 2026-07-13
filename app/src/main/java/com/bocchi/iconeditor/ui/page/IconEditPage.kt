@@ -1,0 +1,631 @@
+package com.bocchi.iconeditor.ui.page
+
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.net.Uri
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.bocchi.iconeditor.model.IconAsset
+import com.bocchi.iconeditor.R
+import com.bocchi.iconeditor.model.IconListItem
+import com.bocchi.iconeditor.ui.component.navigationBarBottomPadding
+import com.bocchi.iconeditor.ui.component.EmptyState
+import com.bocchi.iconeditor.ui.component.withPageMargins
+import top.yukonga.miuix.kmp.basic.Button
+import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.CardDefaults
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.IconButton
+import top.yukonga.miuix.kmp.basic.InfiniteProgressIndicator
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.extended.Close
+import top.yukonga.miuix.kmp.icon.extended.All
+import top.yukonga.miuix.kmp.icon.extended.Ok
+import top.yukonga.miuix.kmp.overlay.OverlayBottomSheet
+import top.yukonga.miuix.kmp.overlay.OverlayDialog
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.utils.overScrollVertical
+import java.io.File
+
+@Composable
+fun IconEditPage(
+    items: List<IconListItem>,
+    contentPadding: PaddingValues = PaddingValues(),
+    loading: Boolean = false,
+    iconFile: (IconAsset) -> File?,
+    onConfirmEdits: (String, String?, Int?, List<Pair<IconAsset, Uri>>, List<Uri>) -> Unit,
+    onDeleteIcon: (IconAsset) -> Unit,
+) {
+    var visibleSheetPackageName by remember { mutableStateOf<String?>(null) }
+    var retainedSheetPackageName by remember { mutableStateOf<String?>(null) }
+    val selectedItem = retainedSheetPackageName?.let { packageName ->
+        items.firstOrNull { it.packageName == packageName }
+    }
+    var draftVariantKey by remember { mutableStateOf<String?>(null) }
+    var draftSelectedAdditionIndex by remember { mutableStateOf<Int?>(null) }
+    var draftReplacements by remember { mutableStateOf<List<Pair<IconAsset, Uri>>>(emptyList()) }
+    var draftAdditions by remember { mutableStateOf<List<Uri>>(emptyList()) }
+    var pendingImport by remember { mutableStateOf<PendingIconImport?>(null) }
+    val imageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val import = pendingImport
+        if (uri != null && import != null) {
+            when (import) {
+                PendingIconImport.Add -> {
+                    val additionIndex = draftAdditions.size
+                    draftAdditions = draftAdditions + uri
+                    if (selectedItem?.variants.isNullOrEmpty() && draftSelectedAdditionIndex == null) {
+                        draftVariantKey = null
+                        draftSelectedAdditionIndex = additionIndex
+                    }
+                }
+                is PendingIconImport.Replace -> {
+                    draftReplacements = draftReplacements
+                        .filterNot { it.first.archivePath == import.asset.archivePath } +
+                        (import.asset to uri)
+                }
+                is PendingIconImport.ReplaceAddition -> {
+                    if (import.index in draftAdditions.indices) {
+                        draftAdditions = draftAdditions.toMutableList().apply {
+                            this[import.index] = uri
+                        }
+                    }
+                }
+            }
+        }
+        pendingImport = null
+    }
+    LaunchedEffect(selectedItem?.packageName, selectedItem?.selected?.variantKey) {
+        draftVariantKey = selectedItem?.selected?.variantKey
+    }
+    fun openSheet(packageName: String) {
+        val item = items.firstOrNull { it.packageName == packageName }
+        draftVariantKey = item?.selected?.variantKey
+        draftSelectedAdditionIndex = null
+        draftReplacements = emptyList()
+        draftAdditions = emptyList()
+        retainedSheetPackageName = packageName
+        visibleSheetPackageName = packageName
+    }
+
+    fun requestCloseSheet() {
+        visibleSheetPackageName = null
+    }
+
+    val listContentPadding = contentPadding.withPageMargins(vertical = 10.dp)
+    if (loading) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center,
+        ) {
+            InfiniteProgressIndicator(
+                color = Color.White,
+                size = 32.dp,
+                strokeWidth = 2.5.dp,
+                orbitingDotSize = 3.dp,
+            )
+        }
+    } else {
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxSize()
+                .imePadding(),
+        ) {
+            val emptyHeight = (
+                maxHeight - listContentPadding.calculateTopPadding() - listContentPadding.calculateBottomPadding()
+                ).coerceAtLeast(0.dp)
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .overScrollVertical(),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                contentPadding = listContentPadding,
+                overscrollEffect = null,
+            ) {
+                if (items.isEmpty()) {
+                    item {
+                        EmptyState(
+                            text = stringResource(R.string.empty_icons),
+                            icon = MiuixIcons.All,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(emptyHeight),
+                        )
+                    }
+                } else {
+                    items(items, key = { it.packageName }) { item ->
+                        IconRow(
+                            item = item,
+                            iconFile = iconFile,
+                            onClick = { openSheet(item.packageName) },
+                        )
+                    }
+                }
+            }
+        }
+    }
+    OverlayBottomSheet(
+        show = visibleSheetPackageName != null && selectedItem != null,
+        title = stringResource(R.string.icon_styles),
+        startAction = {
+            IconButton(onClick = ::requestCloseSheet) {
+                Icon(MiuixIcons.Close, contentDescription = stringResource(R.string.action_close))
+            }
+        },
+        endAction = {
+            IconButton(onClick = {
+                val item = selectedItem
+                if (item != null) {
+                    onConfirmEdits(
+                        item.packageName,
+                        draftVariantKey,
+                        draftSelectedAdditionIndex,
+                        draftReplacements,
+                        draftAdditions,
+                    )
+                }
+                requestCloseSheet()
+            }) {
+                Icon(MiuixIcons.Ok, contentDescription = stringResource(R.string.action_done))
+            }
+        },
+        onDismissRequest = ::requestCloseSheet,
+        onDismissFinished = {
+            if (visibleSheetPackageName == null) {
+                retainedSheetPackageName = null
+                draftReplacements = emptyList()
+                draftAdditions = emptyList()
+                draftSelectedAdditionIndex = null
+                pendingImport = null
+            }
+        },
+    ) {
+        selectedItem?.let { item ->
+            IconActionSheet(
+                iconItem = item,
+                iconFile = iconFile,
+                draftVariantKey = draftVariantKey,
+                draftSelectedAdditionIndex = draftSelectedAdditionIndex,
+                draftReplacements = draftReplacements,
+                draftAdditions = draftAdditions,
+                onSelectExistingVariant = {
+                    draftVariantKey = it
+                    draftSelectedAdditionIndex = null
+                },
+                onSelectAddition = {
+                    draftSelectedAdditionIndex = it
+                    draftVariantKey = null
+                },
+                onStageReplace = { asset ->
+                    pendingImport = PendingIconImport.Replace(asset)
+                    imageLauncher.launch(arrayOf("image/png", "image/webp", "image/jpeg", "image/*"))
+                },
+                onDeleteIcon = onDeleteIcon,
+                onDeleteAddition = { index ->
+                    if (index in draftAdditions.indices) {
+                        val remaining = draftAdditions.toMutableList().apply { removeAt(index) }
+                        draftAdditions = remaining
+                        val selectedIndex = draftSelectedAdditionIndex
+                        when {
+                            selectedIndex == index && remaining.isNotEmpty() -> {
+                                draftSelectedAdditionIndex = index.coerceAtMost(remaining.lastIndex)
+                                draftVariantKey = null
+                            }
+                            selectedIndex == index -> {
+                                draftSelectedAdditionIndex = null
+                                draftVariantKey = item.selected?.variantKey
+                            }
+                            selectedIndex != null && selectedIndex > index -> {
+                                draftSelectedAdditionIndex = selectedIndex - 1
+                            }
+                        }
+                    }
+                },
+                onStageReplaceAddition = { index ->
+                    pendingImport = PendingIconImport.ReplaceAddition(index)
+                    imageLauncher.launch(arrayOf("image/png", "image/webp", "image/jpeg", "image/*"))
+                },
+                onStageAdd = {
+                    pendingImport = PendingIconImport.Add
+                    imageLauncher.launch(arrayOf("image/png", "image/webp", "image/jpeg", "image/*"))
+                },
+            )
+        }
+    }
+}
+
+@Composable
+fun IconRow(
+    item: IconListItem,
+    iconFile: (IconAsset) -> File?,
+    onClick: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        insideMargin = PaddingValues(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 12.dp),
+        onClick = onClick,
+        showIndication = true,
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconPreview(
+                file = item.selected?.let(iconFile),
+                packageName = item.packageName,
+            )
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(item.appName, style = MiuixTheme.textStyles.title4, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(item.packageName, style = MiuixTheme.textStyles.subtitle, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            val tags = iconStatusTags(item)
+            if (tags.isNotEmpty()) {
+                Column(
+                    modifier = Modifier.padding(start = 12.dp),
+                    horizontalAlignment = Alignment.End,
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    tags.forEach { Tag(it) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun IconActionSheet(
+    iconItem: IconListItem,
+    iconFile: (IconAsset) -> File?,
+    draftVariantKey: String?,
+    draftSelectedAdditionIndex: Int?,
+    draftReplacements: List<Pair<IconAsset, Uri>>,
+    draftAdditions: List<Uri>,
+    onSelectExistingVariant: (String) -> Unit,
+    onSelectAddition: (Int) -> Unit,
+    onStageReplace: (IconAsset) -> Unit,
+    onDeleteIcon: (IconAsset) -> Unit,
+    onDeleteAddition: (Int) -> Unit,
+    onStageReplaceAddition: (Int) -> Unit,
+    onStageAdd: () -> Unit,
+) {
+    var pendingDeleteIndex by remember(iconItem.packageName) { mutableIntStateOf(-1) }
+    var pendingDelete by remember(iconItem.packageName) { mutableStateOf<IconAsset?>(null) }
+    var pendingDeleteAdditionIndex by remember(iconItem.packageName) { mutableIntStateOf(-1) }
+
+    fun clearPendingDelete() {
+        pendingDelete = null
+        pendingDeleteIndex = -1
+        pendingDeleteAdditionIndex = -1
+    }
+
+    val context = LocalContext.current
+    val resources = LocalResources.current
+    val previewVariant = iconItem.variants.find { it.variantKey == draftVariantKey }
+    val replacementUris = remember(draftReplacements) {
+        draftReplacements.associate { (asset, uri) -> asset.archivePath to uri }
+    }
+    val previewUri = previewVariant?.let { replacementUris[it.archivePath] }
+        ?: draftSelectedAdditionIndex?.let(draftAdditions::getOrNull)
+    val hasSelectedStyle = draftSelectedAdditionIndex != null || previewVariant != null
+    val appNameLabel = stringResource(R.string.app_name_label)
+    val packageNameLabel = stringResource(R.string.package_name_label)
+
+    val copyText: (String, String) -> Unit = { label, text ->
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText(label, text))
+        Toast.makeText(context, resources.getString(R.string.copied_format, text), Toast.LENGTH_SHORT).show()
+    }
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(max = 760.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        contentPadding = PaddingValues(bottom = navigationBarBottomPadding() + 16.dp),
+    ) {
+        item {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 14.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                IconPreview(
+                    file = (previewVariant ?: iconItem.selected)?.let(iconFile),
+                    uri = previewUri,
+                    packageName = iconItem.packageName,
+                    size = 100.dp,
+                    imageSize = 90.dp,
+                )
+                Text(
+                    modifier = Modifier.combinedClickable(
+                        onClick = {},
+                        onLongClick = { copyText(appNameLabel, iconItem.appName) },
+                    ),
+                    text = iconItem.appName,
+                    style = MiuixTheme.textStyles.title4,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    modifier = Modifier.combinedClickable(
+                        onClick = {},
+                        onLongClick = { copyText(packageNameLabel, iconItem.packageName) },
+                    ),
+                    text = iconItem.packageName,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    style = MiuixTheme.textStyles.footnote1,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+
+        if (iconItem.variants.isNotEmpty()) {
+            itemsIndexed(iconItem.variants, key = { _, variant -> variant.variantKey }) { index, variant ->
+                val selected = draftSelectedAdditionIndex == null && draftVariantKey == variant.variantKey
+                val replacementUri = replacementUris[variant.archivePath]
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    insideMargin = PaddingValues(start = 12.dp, end = 12.dp, top = 10.dp, bottom = 10.dp),
+                    colors = CardDefaults.defaultColors(
+                        color = MiuixTheme.colorScheme.secondaryContainer.copy(alpha = 0.42f),
+                    ),
+                    onClick = { onSelectExistingVariant(variant.variantKey) },
+                    onLongPress = {
+                        pendingDeleteIndex = index
+                        pendingDelete = variant
+                        pendingDeleteAdditionIndex = -1
+                    },
+                    showIndication = true,
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconPreview(
+                            file = iconFile(variant),
+                            uri = replacementUri,
+                            packageName = iconItem.packageName,
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(stringResource(R.string.style_number, index + 1), fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        if (selected) {
+                            Tag(stringResource(R.string.current_style))
+                        }
+                    }
+                }
+            }
+        }
+
+        itemsIndexed(
+            items = draftAdditions,
+            key = { index, uri -> "draft-addition-$index-$uri" },
+        ) { index, uri ->
+            val selected = draftSelectedAdditionIndex == index
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                insideMargin = PaddingValues(start = 12.dp, end = 12.dp, top = 10.dp, bottom = 10.dp),
+                colors = CardDefaults.defaultColors(
+                    color = MiuixTheme.colorScheme.secondaryContainer.copy(alpha = 0.42f),
+                ),
+                onClick = { onSelectAddition(index) },
+                onLongPress = {
+                    pendingDelete = null
+                    pendingDeleteIndex = iconItem.variants.size + index
+                    pendingDeleteAdditionIndex = index
+                },
+                showIndication = true,
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconPreview(
+                        file = null,
+                        uri = uri,
+                        packageName = iconItem.packageName,
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        modifier = Modifier.weight(1f),
+                        text = stringResource(R.string.style_number, iconItem.variants.size + index + 1),
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (selected) {
+                        Tag(stringResource(R.string.current_style))
+                    }
+                }
+            }
+        }
+
+        item {
+            Row(
+                modifier = Modifier.padding(top = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Button(
+                    modifier = Modifier.weight(1f),
+                    onClick = onStageAdd,
+                ) {
+                    Text(stringResource(R.string.add_image))
+                }
+                Button(
+                    modifier = Modifier.weight(1f),
+                    enabled = hasSelectedStyle,
+                    onClick = {
+                        when {
+                            draftSelectedAdditionIndex != null ->
+                                onStageReplaceAddition(draftSelectedAdditionIndex)
+                            previewVariant != null -> onStageReplace(previewVariant)
+                            iconItem.selected != null -> onStageReplace(iconItem.selected)
+                            else -> Unit
+                        }
+                    },
+                ) {
+                    Text(stringResource(R.string.import_replace))
+                }
+            }
+        }
+    }
+
+    OverlayDialog(
+        show = pendingDelete != null || pendingDeleteAdditionIndex >= 0,
+        title = stringResource(R.string.delete_style_title),
+        summary = stringResource(R.string.delete_style_summary, pendingDeleteIndex + 1),
+        onDismissRequest = ::clearPendingDelete,
+    ) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Button(modifier = Modifier.weight(1f), onClick = ::clearPendingDelete) { Text(stringResource(R.string.action_cancel)) }
+            Button(modifier = Modifier.weight(1f), onClick = {
+                pendingDelete?.let(onDeleteIcon)
+                if (pendingDeleteAdditionIndex >= 0) onDeleteAddition(pendingDeleteAdditionIndex)
+                clearPendingDelete()
+            }) {
+                Text(stringResource(R.string.action_confirm))
+            }
+        }
+    }
+}
+
+private sealed interface PendingIconImport {
+    data object Add : PendingIconImport
+    data class Replace(val asset: IconAsset) : PendingIconImport
+    data class ReplaceAddition(val index: Int) : PendingIconImport
+}
+
+@Composable
+fun iconStatusTags(item: IconListItem): List<String> {
+    return buildList {
+        if (!item.adapted) add(stringResource(R.string.unadapted))
+        if (item.variants.size > 1) {
+            add(pluralStringResource(R.plurals.style_count, item.variants.size, item.variants.size))
+        }
+    }
+}
+
+@Composable
+fun IconPreview(
+    file: File?,
+    uri: Uri? = null,
+    packageName: String? = null,
+    size: Dp = 48.dp,
+    imageSize: Dp = 42.dp,
+) {
+    val context = LocalContext.current
+    val bitmap = remember(context, uri, file?.absolutePath, file?.lastModified(), packageName) {
+        val draftBitmap = uri?.let {
+            runCatching {
+                context.contentResolver.openInputStream(it)?.use(android.graphics.BitmapFactory::decodeStream)
+            }.getOrNull()
+        }
+        val projectBitmap = draftBitmap ?: file?.takeIf {
+            it.exists() && it.extension.lowercase() != "svg"
+        }?.let {
+            android.graphics.BitmapFactory.decodeFile(it.absolutePath)
+        }
+        projectBitmap ?: packageName?.let { packageIconBitmap(context, it) }
+    }
+    Box(
+        modifier = Modifier.size(size),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = null,
+                modifier = Modifier.size(imageSize),
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .size(size)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MiuixTheme.colorScheme.secondaryContainer),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "ICON",
+                    style = MiuixTheme.textStyles.footnote2,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+            }
+        }
+    }
+}
+
+fun packageIconBitmap(context: Context, packageName: String): android.graphics.Bitmap? {
+    return runCatching {
+        val drawable = context.packageManager.getApplicationIcon(packageName)
+        val size = 96
+        val bitmap = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(bitmap)
+        drawable.setBounds(0, 0, size, size)
+        drawable.draw(canvas)
+        bitmap
+    }.getOrNull()
+}
+
+@Composable
+fun Tag(text: String) {
+    Box(
+        modifier = Modifier
+            .background(
+                color = MiuixTheme.colorScheme.tertiaryContainer.copy(alpha = 0.6f),
+                shape = RoundedCornerShape(6.dp),
+            ),
+    ) {
+        Text(
+            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+            text = text,
+            color = MiuixTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.8f),
+            fontSize = 11.sp,
+            fontWeight = FontWeight(750),
+            maxLines = 1,
+            softWrap = false,
+        )
+    }
+}

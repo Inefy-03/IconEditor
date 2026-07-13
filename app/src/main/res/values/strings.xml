@@ -1,0 +1,118 @@
+<resources>
+    <string name="app_name">IconEditor</string>
+    <string name="back">返回</string>
+    <string name="screen_projects">项目</string>
+    <string name="screen_settings">设置</string>
+    <string name="screen_info_edit">信息编辑</string>
+    <string name="screen_icon_edit">图标编辑</string>
+    <string name="screen_theme_settings">主题设置</string>
+    <string name="about_title">关于</string>
+    <string name="about_blend_version">Version %1$s (%2$d)</string>
+    <string name="about_github">GitHub</string>
+    <string name="about_github_desc">查看项目源码</string>
+
+    <string name="action_import_project">导入项目</string>
+    <string name="action_edit_info">编辑信息</string>
+    <string name="action_edit_icons">编辑图标</string>
+    <string name="action_export">导出</string>
+    <string name="action_delete">删除</string>
+    <string name="action_cancel">取消</string>
+    <string name="action_confirm">确认</string>
+    <string name="action_close">关闭</string>
+    <string name="action_done">完成</string>
+    <string name="action_sort">排序</string>
+    <string name="action_more">更多</string>
+
+    <string name="delete_project_title">删除项目</string>
+    <string name="delete_project_summary">确认删除 %1$s？\n这个操作不会删除原始导入文件。</string>
+    <string name="export_format_title">选择导出格式</string>
+    <string name="export_mtz">导出.mtz</string>
+    <string name="export_module_zip">导出模块.zip</string>
+    <string name="dialog_notice">提示</string>
+    <string name="export_complete">导出完成</string>
+    <string name="export_failed_title">导出失败</string>
+    <string name="export_mtz_incomplete">MTZ信息不全</string>
+    <string name="export_module_incomplete">Module信息不全</string>
+    <string name="action_complete_info">前往补全</string>
+
+    <string name="source_universal">通用</string>
+    <string name="source_theme">主题</string>
+    <string name="source_module">模块</string>
+    <string name="tab_mtz_info">MTZ</string>
+    <string name="tab_module_info">Module</string>
+    <string name="module_install_messages">Module installation messages</string>
+
+    <string name="empty_projects">没有项目</string>
+    <string name="empty_icons">没有图标</string>
+    <string name="project_version_format">版本：%1$s</string>
+    <string name="project_author_format">作者：%1$s</string>
+
+    <string name="icon_styles">图标样式</string>
+    <string name="copied_format">已复制: %1$s</string>
+    <string name="app_name_label">应用名</string>
+    <string name="package_name_label">包名</string>
+    <string name="style_number">样式 %1$d</string>
+    <string name="current_style">当前</string>
+    <string name="add_image">添加图片</string>
+    <string name="import_replace">导入覆盖</string>
+    <string name="delete_style_title">删除</string>
+    <string name="delete_style_summary">确认删除该样式？</string>
+    <string name="unadapted">未适配</string>
+    <plurals name="style_count">
+        <item quantity="other">%1$d 个样式</item>
+    </plurals>
+
+    <string name="personalization">个性化</string>
+    <string name="language_title">语言</string>
+    <string name="language_simplified_chinese">简体中文</string>
+    <string name="language_english">English</string>
+    <string name="theme_settings_summary">更改应用主题</string>
+    <string name="settings_other">其他</string>
+    <string name="appearance">外观</string>
+    <string name="blur_title">模糊</string>
+    <string name="blur_summary">启用顶栏和底栏的模糊效果</string>
+    <string name="floating_bottom_bar_title">悬浮底栏</string>
+    <string name="floating_bottom_bar_summary">使用悬浮样式底栏</string>
+    <string name="liquid_glass_title">液态玻璃</string>
+    <string name="liquid_glass_summary">启用悬浮底栏的液态玻璃效果</string>
+    <string name="navigation_and_animation">导航与动画</string>
+    <string name="predictive_back_title">预测返回手势</string>
+    <string name="predictive_back_summary">返回时让页面跟随系统手势移动</string>
+    <string name="theme_mode_title">主题模式</string>
+    <string name="theme_system_option">跟随系统主题</string>
+    <string name="theme_light_option">浅色主题</string>
+    <string name="theme_dark_option">深色主题</string>
+
+    <string name="search_apps_hint">搜索应用名 / 包名</string>
+    <string name="show_local_apps">显示本地应用</string>
+    <string name="show_system_apps">显示系统应用</string>
+    <string name="only_show_multiple_styles">仅显示多样式图标</string>
+    <string name="only_show_unadapted_icons">仅显示未适配图标</string>
+    <string name="new_project">新建项目</string>
+    <string name="imported_project">导入项目</string>
+    <string name="import_failed_title">导入失败</string>
+    <string name="import_invalid_file">文件不符合要求\n只支持.mtz和图标模块.zip</string>
+    <string name="unnamed_project">未命名项目</string>
+    <string name="sort_app_name">应用名</string>
+    <string name="sort_package_name">包名</string>
+    <string name="sort_project_created">新建/导入时间</string>
+    <string name="sort_project_modified">修改时间</string>
+    <string name="sort_project_name">名称</string>
+    <string name="sort_descending">倒序</string>
+
+    <string name="error_read_import">无法读取导入文件</string>
+    <string name="error_read_icon">无法读取图标文件</string>
+    <string name="error_create_export">无法创建导出文件</string>
+    <string name="error_invalid_zip_path">非法 zip 路径: %1$s</string>
+    <string name="validation_mtz_version">请填写 MTZ 版本号</string>
+    <string name="validation_mtz_author">请填写 MTZ 作者</string>
+    <string name="validation_mtz_designer">请填写 MTZ 设计师</string>
+    <string name="validation_mtz_title">请填写 MTZ 标题</string>
+    <string name="validation_module_id">请填写 Module id</string>
+    <string name="validation_module_name">请填写 Module name</string>
+    <string name="validation_module_author">请填写 Module author</string>
+    <string name="validation_module_version">请填写 Module version</string>
+    <string name="validation_module_theme">请填写 Module theme</string>
+    <string name="validation_module_theme_id">请填写 Module themeid</string>
+    <string name="validation_module_id_format">Module id 格式不正确</string>
+</resources>

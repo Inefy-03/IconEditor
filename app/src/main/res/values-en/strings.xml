@@ -1,0 +1,119 @@
+<resources>
+    <string name="app_name">IconEditor</string>
+    <string name="back">Back</string>
+    <string name="screen_projects">Projects</string>
+    <string name="screen_settings">Settings</string>
+    <string name="screen_info_edit">Edit information</string>
+    <string name="screen_icon_edit">Edit icons</string>
+    <string name="screen_theme_settings">Theme settings</string>
+    <string name="about_title">About</string>
+    <string name="about_blend_version">Version %1$s (%2$d)</string>
+    <string name="about_github">GitHub</string>
+    <string name="about_github_desc">View project source</string>
+
+    <string name="action_import_project">Import project</string>
+    <string name="action_edit_info">Edit information</string>
+    <string name="action_edit_icons">Edit icons</string>
+    <string name="action_export">Export</string>
+    <string name="action_delete">Delete</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_confirm">Confirm</string>
+    <string name="action_close">Close</string>
+    <string name="action_done">Done</string>
+    <string name="action_sort">Sort</string>
+    <string name="action_more">More</string>
+
+    <string name="delete_project_title">Delete project</string>
+    <string name="delete_project_summary">Delete %1$s? \nThis does not delete the original imported file.</string>
+    <string name="export_format_title">Choose export format</string>
+    <string name="export_mtz">Export .mtz</string>
+    <string name="export_module_zip">Export module .zip</string>
+    <string name="dialog_notice">Notice</string>
+    <string name="export_complete">Export complete</string>
+    <string name="export_failed_title">Export failed</string>
+    <string name="export_mtz_incomplete">MTZ information is incomplete</string>
+    <string name="export_module_incomplete">Module information is incomplete</string>
+    <string name="action_complete_info">Complete information</string>
+
+    <string name="source_universal">Universal</string>
+    <string name="source_theme">Theme</string>
+    <string name="source_module">Module</string>
+    <string name="tab_mtz_info">MTZ</string>
+    <string name="tab_module_info">Module</string>
+    <string name="module_install_messages">Module installation messages</string>
+
+    <string name="empty_projects">No projects</string>
+    <string name="empty_icons">No icons</string>
+    <string name="project_version_format">Version: %1$s</string>
+    <string name="project_author_format">Author: %1$s</string>
+
+    <string name="icon_styles">Icon styles</string>
+    <string name="copied_format">Copied: %1$s</string>
+    <string name="app_name_label">App name</string>
+    <string name="package_name_label">Package name</string>
+    <string name="style_number">Style %1$d</string>
+    <string name="current_style">Current</string>
+    <string name="add_image">Add image</string>
+    <string name="import_replace">Import replacement</string>
+    <string name="delete_style_title">Delete</string>
+    <string name="delete_style_summary">Delete this style?</string>
+    <string name="unadapted">Unadapted</string>
+    <plurals name="style_count">
+        <item quantity="one">%1$d style</item>
+        <item quantity="other">%1$d styles</item>
+    </plurals>
+
+    <string name="personalization">Personalization</string>
+    <string name="language_title">Language</string>
+    <string name="language_simplified_chinese">简体中文</string>
+    <string name="language_english">English</string>
+    <string name="theme_settings_summary">Change the app theme</string>
+    <string name="settings_other">Other</string>
+    <string name="appearance">Appearance</string>
+    <string name="blur_title">Blur</string>
+    <string name="blur_summary">Blur the top and bottom bars</string>
+    <string name="floating_bottom_bar_title">Floating bottom bar</string>
+    <string name="floating_bottom_bar_summary">Use a floating bottom bar</string>
+    <string name="liquid_glass_title">Liquid glass</string>
+    <string name="liquid_glass_summary">Use liquid glass for the floating bottom bar</string>
+    <string name="navigation_and_animation">Navigation and animation</string>
+    <string name="predictive_back_title">Predictive back gesture</string>
+    <string name="predictive_back_summary">Move the page with the system back gesture</string>
+    <string name="theme_mode_title">Theme mode</string>
+    <string name="theme_system_option">Follow system theme</string>
+    <string name="theme_light_option">Light theme</string>
+    <string name="theme_dark_option">Dark theme</string>
+
+    <string name="search_apps_hint">Search app name / package</string>
+    <string name="show_local_apps">Show local apps</string>
+    <string name="show_system_apps">Show system apps</string>
+    <string name="only_show_multiple_styles">Only show multiple-style icons</string>
+    <string name="only_show_unadapted_icons">Only show unadapted icons</string>
+    <string name="new_project">New project</string>
+    <string name="imported_project">Imported project</string>
+    <string name="import_failed_title">Import failed</string>
+    <string name="import_invalid_file">File does not meet requirements\nOnly .mtz and icon module .zip are supported</string>
+    <string name="unnamed_project">Unnamed project</string>
+    <string name="sort_app_name">App name</string>
+    <string name="sort_package_name">Package name</string>
+    <string name="sort_project_created">Created/imported time</string>
+    <string name="sort_project_modified">Modified time</string>
+    <string name="sort_project_name">Name</string>
+    <string name="sort_descending">Descending</string>
+
+    <string name="error_read_import">Unable to read the imported file</string>
+    <string name="error_read_icon">Unable to read the icon file</string>
+    <string name="error_create_export">Unable to create the export file</string>
+    <string name="error_invalid_zip_path">Invalid zip path: %1$s</string>
+    <string name="validation_mtz_version">Enter the MTZ version</string>
+    <string name="validation_mtz_author">Enter the MTZ author</string>
+    <string name="validation_mtz_designer">Enter the MTZ designer</string>
+    <string name="validation_mtz_title">Enter the MTZ title</string>
+    <string name="validation_module_id">Enter the Module id</string>
+    <string name="validation_module_name">Enter the Module name</string>
+    <string name="validation_module_author">Enter the Module author</string>
+    <string name="validation_module_version">Enter the Module version</string>
+    <string name="validation_module_theme">Enter the Module theme</string>
+    <string name="validation_module_theme_id">Enter the Module themeid</string>
+    <string name="validation_module_id_format">The Module id format is invalid</string>
+</resources>
