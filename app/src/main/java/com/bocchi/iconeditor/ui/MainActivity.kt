@@ -649,13 +649,14 @@ private fun installExportedApk(context: Context, uri: Uri): Boolean {
         return false
     }
     val installed = runCatching {
-        context.startActivity(
-            Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(uri, "application/vnd.android.package-archive")
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            },
-        )
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, "application/vnd.android.package-archive")
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            // 部分系统需要 clipData 才会把 URI 读权限传给安装器
+            clipData = android.content.ClipData.newRawUri("apk", uri)
+        }
+        context.startActivity(intent)
     }.isSuccess
     if (!installed) {
         Toast.makeText(

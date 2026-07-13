@@ -706,7 +706,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     logs = (lastProgress?.logs ?: emptyList()) + message,
                 )
                 if (format == ExportFormat.Apk) {
-                    pendingApkInstallUri = target
+                    val installUri = withContext(Dispatchers.IO) {
+                        runCatching { repository.prepareInstallableApkUri(target) }
+                    }
+                    pendingApkInstallUri = installUri.getOrElse { error ->
+                        showError(error)
+                        target
+                    }
                 }
             }.onFailure { error ->
                 if (error is CancellationException) throw error

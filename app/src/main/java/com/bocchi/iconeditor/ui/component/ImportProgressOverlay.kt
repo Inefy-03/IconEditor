@@ -186,25 +186,20 @@ private fun TaskProgressOverlay(
                     Text(stringResource(R.string.export_copy_logs))
                 }
             }
-            // 结束按钮区预留固定高度，避免完成后突然增高导致居中抖动
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(if (allowCopyLogs) 88.dp else if (finished && onDismiss != null) 48.dp else 0.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                if (finished && success && installUri != null && onInstall != null) {
-                    Text(
-                        text = stringResource(R.string.export_apk_install_summary),
-                        fontSize = 13.sp,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                if (finished && onDismiss != null) {
+            if (finished && onDismiss != null) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     if (success && installUri != null && onInstall != null) {
+                        Text(
+                            text = stringResource(R.string.export_apk_install_summary),
+                            fontSize = 13.sp,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(10.dp),

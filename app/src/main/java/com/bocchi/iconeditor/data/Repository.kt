@@ -644,6 +644,31 @@ class ProjectRepository(private val context: Context) {
         updateProject(project.copy(dirty = false))
     }
 
+    /**
+     * 将刚导出的 APK 复制到应用缓存并返回 FileProvider URI。
+     * 安装器直接读 Downloads/SAF 的 content URI 时，部分机型会缓存旧文件。
+     */
+    fun prepareInstallableApkUri(sourceUri: Uri): Uri {
+        val installDir = File(context.cacheDir, "apk-install").apply { mkdirs() }
+        installDir.listFiles()
+            ?.filter { it.isFile && it.extension.equals("apk", ignoreCase = true) }
+            ?.sortedByDescending { it.lastModified() }
+            ?.drop(KEEP_INSTALL_COPIES)
+            ?.forEach { runCatching { it.delete() } }
+        val target = File(installDir, "install-${System.currentTimeMillis()}.apk")
+        context.contentResolver.openInputStream(sourceUri)?.use { input ->
+            target.outputStream().use { output -> input.copyTo(output) }
+        } ?: error(context.getString(R.string.error_read_import))
+        require(target.isFile && target.length() > 0L) {
+            context.getString(R.string.export_apk_install_failed)
+        }
+        return androidx.core.content.FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.fileprovider",
+            target,
+        )
+    }
+
     fun validateForExport(id: String, format: ExportFormat): List<String> {
         val metadata = resolveExportMetadata(id, format, persist = false)
         return validateForExport(format, metadata)
@@ -771,6 +796,7 @@ class ProjectRepository(private val context: Context) {
     }
 
     private companion object {
+        const val KEEP_INSTALL_COPIES = 3
         val ModuleTemplateFiles = listOf(
             "META-INF/com/google/android/update-binary",
             "META-INF/com/google/android/updater-script",
