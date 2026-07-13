@@ -33,6 +33,7 @@
     <string name="export_complete">Export complete</string>
     <string name="export_complete_path">Export complete\nSaved to: %1$s</string>
     <string name="export_failed_title">Export failed</string>
+    <string name="export_failed_generic">Export failed. Please try again</string>
     <string name="export_mtz_incomplete">MTZ information is incomplete</string>
     <string name="export_module_incomplete">Module information is incomplete</string>
     <string name="export_apk_incomplete">APK information is incomplete</string>
@@ -60,6 +61,9 @@
     <string name="current_style">Current</string>
     <string name="add_image">Add image</string>
     <string name="import_replace">Import replacement</string>
+    <string name="export_image">Export image</string>
+    <string name="export_image_success">Image exported\n%1$s</string>
+    <string name="export_image_failed">Failed to export image</string>
     <string name="delete_style_title">Delete</string>
     <string name="delete_style_summary">Delete this style?</string>
     <string name="unadapted">Unadapted</string>
@@ -95,6 +99,7 @@
     <string name="search_apps_hint">Search app name / package</string>
     <string name="show_local_apps">Show local apps</string>
     <string name="show_system_apps">Show system apps</string>
+    <string name="installed_apps_permission_denied">Permission to read the app list is required to show local/system apps. Allow it in system settings and try again</string>
     <string name="only_show_multiple_styles">Only show multiple-style icons</string>
     <string name="only_show_unadapted_icons">Only show unadapted icons</string>
     <string name="new_project">New project</string>
@@ -116,7 +121,12 @@
     <string name="export_phase_failed">Export failed</string>
     <string name="export_close">Close</string>
     <string name="export_close_success">Done</string>
-    <string name="export_failed_generic">Export failed</string>
+    <string name="export_apk_install_title">Install icon pack</string>
+    <string name="export_apk_install_summary">APK exported successfully. Install it now?</string>
+    <string name="export_apk_install_yes">Install</string>
+    <string name="export_apk_install_no">Not now</string>
+    <string name="export_apk_install_failed">Unable to open the installer</string>
+    <string name="export_apk_install_permission">Allow this app to install unknown apps, then try again</string>
     <string name="unnamed_project">Unnamed project</string>
     <string name="sort_app_name">App name</string>
     <string name="sort_package_name">Package name</string>

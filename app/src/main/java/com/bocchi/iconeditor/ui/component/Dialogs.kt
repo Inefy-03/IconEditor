@@ -12,6 +12,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -82,37 +87,56 @@ fun ExportDialog(
     onExport: (ProjectSummary, ExportFormat) -> Unit,
     onValidationFailed: (ProjectSummary, ExportFormat) -> Unit,
 ) {
+    // Local visibility so choosing a format dismisses immediately and cannot be cancelled
+    // mid-animation if parent state briefly flickers.
+    var visible by remember { mutableStateOf(false) }
+    var activeProject by remember { mutableStateOf<ProjectSummary?>(null) }
+    LaunchedEffect(project) {
+        if (project != null) {
+            activeProject = project
+            visible = true
+        } else {
+            visible = false
+        }
+    }
     OverlayDialog(
-        show = project != null,
+        show = visible,
         title = stringResource(R.string.export_format_title),
-        onDismissRequest = onDismiss,
+        onDismissRequest = {
+            visible = false
+            onDismiss()
+        },
     ) {
+        val p = activeProject
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Button(onClick = {
-                val p = project ?: return@Button
+                if (p == null) return@Button
+                visible = false
+                onDismiss()
                 val errors = validate(p.id, ExportFormat.Mtz)
-                if (errors.isEmpty()) onExport(p, ExportFormat.Mtz) else {
-                    onDismiss()
-                    onValidationFailed(p, ExportFormat.Mtz)
-                }
+                if (errors.isEmpty()) onExport(p, ExportFormat.Mtz)
+                else onValidationFailed(p, ExportFormat.Mtz)
             }, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.export_mtz)) }
             Button(onClick = {
-                val p = project ?: return@Button
+                if (p == null) return@Button
+                visible = false
+                onDismiss()
                 val errors = validate(p.id, ExportFormat.ModuleZip)
-                if (errors.isEmpty()) onExport(p, ExportFormat.ModuleZip) else {
-                    onDismiss()
-                    onValidationFailed(p, ExportFormat.ModuleZip)
-                }
+                if (errors.isEmpty()) onExport(p, ExportFormat.ModuleZip)
+                else onValidationFailed(p, ExportFormat.ModuleZip)
             }, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.export_module_zip)) }
             Button(onClick = {
-                val p = project ?: return@Button
+                if (p == null) return@Button
+                visible = false
+                onDismiss()
                 val errors = validate(p.id, ExportFormat.Apk)
-                if (errors.isEmpty()) onExport(p, ExportFormat.Apk) else {
-                    onDismiss()
-                    onValidationFailed(p, ExportFormat.Apk)
-                }
+                if (errors.isEmpty()) onExport(p, ExportFormat.Apk)
+                else onValidationFailed(p, ExportFormat.Apk)
             }, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.export_apk)) }
-            Button(modifier = Modifier.fillMaxWidth(), onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
+            Button(modifier = Modifier.fillMaxWidth(), onClick = {
+                visible = false
+                onDismiss()
+            }) { Text(stringResource(R.string.action_cancel)) }
         }
     }
 }

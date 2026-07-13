@@ -33,6 +33,7 @@
     <string name="export_complete">导出完成</string>
     <string name="export_complete_path">导出完成\n保存至：%1$s</string>
     <string name="export_failed_title">导出失败</string>
+    <string name="export_failed_generic">导出失败，请重试</string>
     <string name="export_mtz_incomplete">MTZ信息不全</string>
     <string name="export_module_incomplete">Module信息不全</string>
     <string name="export_apk_incomplete">APK信息不全</string>
@@ -60,6 +61,9 @@
     <string name="current_style">当前</string>
     <string name="add_image">添加图片</string>
     <string name="import_replace">导入覆盖</string>
+    <string name="export_image">导出图片</string>
+    <string name="export_image_success">图片已导出\n%1$s</string>
+    <string name="export_image_failed">导出图片失败</string>
     <string name="delete_style_title">删除</string>
     <string name="delete_style_summary">确认删除该样式？</string>
     <string name="unadapted">未适配</string>
@@ -94,6 +98,7 @@
     <string name="search_apps_hint">搜索应用名 / 包名</string>
     <string name="show_local_apps">显示本地应用</string>
     <string name="show_system_apps">显示系统应用</string>
+    <string name="installed_apps_permission_denied">需要「读取应用列表」权限才能显示本地/系统应用，请在系统设置中允许后重试</string>
     <string name="only_show_multiple_styles">仅显示多样式图标</string>
     <string name="only_show_unadapted_icons">仅显示未适配图标</string>
     <string name="new_project">新建项目</string>
@@ -115,7 +120,12 @@
     <string name="export_phase_failed">导出失败</string>
     <string name="export_close">关闭</string>
     <string name="export_close_success">完成</string>
-    <string name="export_failed_generic">导出失败</string>
+    <string name="export_apk_install_title">安装图标包</string>
+    <string name="export_apk_install_summary">APK 已导出成功，是否现在安装？</string>
+    <string name="export_apk_install_yes">安装</string>
+    <string name="export_apk_install_no">暂不安装</string>
+    <string name="export_apk_install_failed">无法打开安装程序</string>
+    <string name="export_apk_install_permission">请先允许本应用安装未知应用，然后再试一次</string>
     <string name="unnamed_project">未命名项目</string>
     <string name="sort_app_name">应用名</string>
     <string name="sort_package_name">包名</string>

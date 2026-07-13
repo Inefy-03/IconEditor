@@ -1,5 +1,6 @@
 package com.bocchi.iconeditor.ui.component
 
+import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Arrangement
@@ -49,6 +50,8 @@ fun ImportProgressOverlay(progress: ImportProgress?) {
 fun ExportProgressOverlay(
     progress: ExportProgress?,
     onDismiss: () -> Unit,
+    installUri: Uri? = null,
+    onInstall: ((Uri) -> Unit)? = null,
 ) {
     if (progress == null) return
     TaskProgressOverlay(
@@ -59,6 +62,8 @@ fun ExportProgressOverlay(
         finished = progress.finished,
         success = progress.success,
         onDismiss = onDismiss,
+        installUri = installUri.takeIf { progress.finished && progress.success },
+        onInstall = onInstall,
     )
 }
 
@@ -71,6 +76,8 @@ private fun TaskProgressOverlay(
     finished: Boolean = false,
     success: Boolean = false,
     onDismiss: (() -> Unit)? = null,
+    installUri: Uri? = null,
+    onInstall: ((Uri) -> Unit)? = null,
 ) {
     val logScrollState = rememberScrollState()
     LaunchedEffect(logs.size, logs.lastOrNull()) {
@@ -103,6 +110,13 @@ private fun TaskProgressOverlay(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+            if (finished && success && installUri != null && onInstall != null) {
+                Text(
+                    text = stringResource(R.string.export_apk_install_summary),
+                    fontSize = 13.sp,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+            }
             ImportProgressBar(fraction = fraction)
             Text(
                 text = "${(fraction * 100).toInt()}%",
@@ -131,18 +145,38 @@ private fun TaskProgressOverlay(
                 }
             }
             if (finished && onDismiss != null) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Center,
-                ) {
-                    Button(onClick = onDismiss) {
-                        Text(
-                            text = if (success) {
-                                stringResource(R.string.export_close_success)
-                            } else {
-                                stringResource(R.string.export_close)
-                            },
-                        )
+                if (success && installUri != null && onInstall != null) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Button(
+                            modifier = Modifier.weight(1f),
+                            onClick = onDismiss,
+                        ) {
+                            Text(stringResource(R.string.export_apk_install_no))
+                        }
+                        Button(
+                            modifier = Modifier.weight(1f),
+                            onClick = { onInstall(installUri) },
+                        ) {
+                            Text(stringResource(R.string.export_apk_install_yes))
+                        }
+                    }
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center,
+                    ) {
+                        Button(onClick = onDismiss) {
+                            Text(
+                                text = if (success) {
+                                    stringResource(R.string.export_close_success)
+                                } else {
+                                    stringResource(R.string.export_close)
+                                },
+                            )
+                        }
                     }
                 }
             }

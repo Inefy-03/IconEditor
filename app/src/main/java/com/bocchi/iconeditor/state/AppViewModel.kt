@@ -73,6 +73,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         private set
     var exportProgress by mutableStateOf<ExportProgress?>(null)
         private set
+    var pendingApkInstallUri by mutableStateOf<Uri?>(null)
+        private set
     var projectsScrollToTopRequest by mutableIntStateOf(0)
         private set
 
@@ -109,6 +111,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearMessage() {
         message = null
+    }
+
+    fun notifyInstalledAppsPermissionDenied() {
+        showMessage(
+            R.string.dialog_notice,
+            getApplication<Application>().getString(R.string.installed_apps_permission_denied),
+        )
     }
 
     fun preloadInstalledApps(forceRefresh: Boolean = false) {
@@ -247,7 +256,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 (!iconPreferences.showSystemApps && preferences.showSystemApps)
         iconPreferences = preferences
         selectedProjectId?.let { repository.saveIconPreferences(it, preferences) }
-        if (enabledInstalledAppSource && localApps.size <= 1) {
+        if (enabledInstalledAppSource) {
             preloadInstalledApps(forceRefresh = true)
         }
     }
@@ -315,9 +324,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         exportProgress = null
     }
 
+    fun clearPendingApkInstall() {
+        pendingApkInstallUri = null
+    }
+
     fun exportProject(id: String, format: ExportFormat, target: Uri, locationLabel: String = "") {
         viewModelScope.launch {
             isExporting = true
+            pendingApkInstallUri = null
             exportProgress = ExportProgress(com.bocchi.iconeditor.model.ExportPhase.Preparing)
             val progressChannel = Channel<ExportProgress>(capacity = Channel.UNLIMITED)
             var lastProgress: ExportProgress? = null
@@ -346,6 +360,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     detail = message,
                     logs = (lastProgress?.logs ?: emptyList()) + message,
                 )
+                if (format == ExportFormat.Apk) {
+                    pendingApkInstallUri = target
+                }
             }.onFailure { error ->
                 if (error is CancellationException) throw error
                 val summary = error.message?.takeIf { it.isNotBlank() }

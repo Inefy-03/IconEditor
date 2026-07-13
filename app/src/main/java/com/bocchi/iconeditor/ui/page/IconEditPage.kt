@@ -350,6 +350,48 @@ fun IconActionSheet(
     val previewUri = previewVariant?.let { replacementUris[it.archivePath] }
         ?: draftSelectedAdditionIndex?.let(draftAdditions::getOrNull)
     val hasSelectedStyle = draftSelectedAdditionIndex != null || previewVariant != null
+    val exportFileName = remember(iconItem.packageName, draftVariantKey, draftSelectedAdditionIndex) {
+        val styleSuffix = when {
+            draftSelectedAdditionIndex != null -> "_${iconItem.variants.size + draftSelectedAdditionIndex + 1}"
+            previewVariant != null -> {
+                val index = iconItem.variants.indexOfFirst { it.variantKey == previewVariant.variantKey }
+                if (index >= 0) "_${index + 1}" else ""
+            }
+            else -> ""
+        }
+        "${iconItem.packageName}$styleSuffix.png"
+    }
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("image/png"),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val ok = runCatching {
+            val bytes = resolveExportPngBytes(
+                context = context,
+                previewUri = previewUri,
+                previewFile = previewVariant?.let(iconFile),
+                packageName = iconItem.packageName,
+            ) ?: error("empty")
+            context.contentResolver.openOutputStream(uri)?.use { output ->
+                output.write(bytes)
+            } ?: error("no stream")
+        }.isSuccess
+        val message = if (ok) {
+            resources.getString(R.string.export_image_success, uri.lastPathSegment ?: exportFileName)
+        } else {
+            resources.getString(R.string.export_image_failed)
+        }
+        Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+    }
+    val hasPackageIcon = remember(iconItem.packageName) {
+        runCatching {
+            context.packageManager.getApplicationIcon(iconItem.packageName)
+            true
+        }.getOrDefault(false)
+    }
+    val canExportImage = previewUri != null ||
+        previewVariant?.let(iconFile)?.isFile == true ||
+        hasPackageIcon
     val appNameLabel = stringResource(R.string.app_name_label)
     val packageNameLabel = stringResource(R.string.package_name_label)
 
@@ -483,30 +525,39 @@ fun IconActionSheet(
         }
 
         item {
-            Row(
+            Column(
                 modifier = Modifier.padding(top = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Button(
-                    modifier = Modifier.weight(1f),
-                    onClick = onStageAdd,
-                ) {
-                    Text(stringResource(R.string.add_image))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button(
+                        modifier = Modifier.weight(1f),
+                        onClick = onStageAdd,
+                    ) {
+                        Text(stringResource(R.string.add_image))
+                    }
+                    Button(
+                        modifier = Modifier.weight(1f),
+                        enabled = hasSelectedStyle,
+                        onClick = {
+                            when {
+                                draftSelectedAdditionIndex != null ->
+                                    onStageReplaceAddition(draftSelectedAdditionIndex)
+                                previewVariant != null -> onStageReplace(previewVariant)
+                                iconItem.selected != null -> onStageReplace(iconItem.selected)
+                                else -> Unit
+                            }
+                        },
+                    ) {
+                        Text(stringResource(R.string.import_replace))
+                    }
                 }
                 Button(
-                    modifier = Modifier.weight(1f),
-                    enabled = hasSelectedStyle,
-                    onClick = {
-                        when {
-                            draftSelectedAdditionIndex != null ->
-                                onStageReplaceAddition(draftSelectedAdditionIndex)
-                            previewVariant != null -> onStageReplace(previewVariant)
-                            iconItem.selected != null -> onStageReplace(iconItem.selected)
-                            else -> Unit
-                        }
-                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = canExportImage,
+                    onClick = { exportLauncher.launch(exportFileName) },
                 ) {
-                    Text(stringResource(R.string.import_replace))
+                    Text(stringResource(R.string.export_image))
                 }
             }
         }
@@ -607,6 +658,34 @@ fun packageIconBitmap(context: Context, packageName: String): android.graphics.B
         drawable.draw(canvas)
         bitmap
     }.getOrNull()
+}
+
+private fun resolveExportPngBytes(
+    context: Context,
+    previewUri: Uri?,
+    previewFile: File?,
+    packageName: String,
+): ByteArray? {
+    previewUri?.let { uri ->
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            return input.readBytes()
+        }
+    }
+    previewFile?.takeIf { it.isFile }?.let { file ->
+        if (file.extension.lowercase() == "png") {
+            return file.readBytes()
+        }
+        val decoded = android.graphics.BitmapFactory.decodeFile(file.absolutePath) ?: return@let
+        return encodePng(decoded)
+    }
+    val packageBitmap = packageIconBitmap(context, packageName) ?: return null
+    return encodePng(packageBitmap)
+}
+
+private fun encodePng(bitmap: android.graphics.Bitmap): ByteArray {
+    val stream = java.io.ByteArrayOutputStream()
+    bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, stream)
+    return stream.toByteArray()
 }
 
 @Composable

@@ -55,22 +55,29 @@ object ExportDirectoryHelper {
         settings: AppSettings,
         mimeType: String,
         displayName: String,
-    ): ExportTarget? {
+    ): ExportTarget? = runCatching {
         val customTree = settings.exportDirectoryUri.takeIf { it.isNotBlank() }?.let(Uri::parse)
         val folderLabel = displayLabel(context, settings)
-        return if (customTree != null) {
-            val uri = createInTree(context.contentResolver, customTree, mimeType, displayName) ?: return null
-            val name = queryDisplayName(context.contentResolver, uri).ifBlank { displayName }
-            ExportTarget(uri = uri, displayName = name, locationLabel = "$folderLabel/$name")
-        } else {
-            val result = createInDownloads(context.contentResolver, mimeType, displayName) ?: return null
-            ExportTarget(
-                uri = result.uri,
-                displayName = result.displayName,
-                locationLabel = "${context.getString(R.string.export_directory_download_default)}/${result.displayName}",
-            )
+        if (customTree != null) {
+            val uri = createInTree(context.contentResolver, customTree, mimeType, displayName)
+            if (uri != null) {
+                val name = queryDisplayName(context.contentResolver, uri).ifBlank { displayName }
+                return@runCatching ExportTarget(
+                    uri = uri,
+                    displayName = name,
+                    locationLabel = "$folderLabel/$name",
+                )
+            }
+            // Tree URI invalid/inaccessible — fall back to MediaStore Downloads.
         }
-    }
+        val result = createInDownloads(context.contentResolver, mimeType, displayName)
+            ?: return@runCatching null
+        ExportTarget(
+            uri = result.uri,
+            displayName = result.displayName,
+            locationLabel = "${context.getString(R.string.export_directory_download_default)}/${result.displayName}",
+        )
+    }.getOrNull()
 
     fun describeExportLocation(context: Context, settings: AppSettings, uri: Uri, fallbackName: String): String {
         val folder = displayLabel(context, settings)
@@ -131,11 +138,15 @@ object ExportDirectoryHelper {
         treeUri: Uri,
         mimeType: String,
         displayName: String,
-    ): Uri? {
+    ): Uri? = runCatching {
+        val parentDocumentUri = DocumentsContract.buildDocumentUriUsingTree(
+            treeUri,
+            DocumentsContract.getTreeDocumentId(treeUri),
+        )
         val existingNames = listTreeDocumentNames(resolver, treeUri)
         val uniqueName = ensureUniqueName(displayName, existingNames)
-        return DocumentsContract.createDocument(resolver, treeUri, mimeType, uniqueName)
-    }
+        DocumentsContract.createDocument(resolver, parentDocumentUri, mimeType, uniqueName)
+    }.getOrNull()
 
     private fun ensureUniqueDownloadsName(resolver: ContentResolver, displayName: String): String {
         val existingNames = queryDownloadsDisplayNames(resolver)

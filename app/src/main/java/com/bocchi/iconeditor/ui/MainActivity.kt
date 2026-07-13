@@ -4,8 +4,11 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.DocumentsContract
+import android.provider.Settings
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -104,7 +107,6 @@ internal val ProjectImportMimeTypes = listOf(
 )
 internal const val ProjectImportPrimaryMimeType = "application/zip"
 private const val InstalledAppsPermission = "com.android.permission.GET_INSTALLED_APPS"
-private const val MiuiSecurityPackage = "com.lbe.security.miui"
 
 private class OpenProjectDocument : ActivityResultContracts.OpenDocument() {
     override fun createIntent(context: Context, input: Array<String>): Intent =
@@ -170,6 +172,7 @@ private fun IconEditorApp(
 ) {
     var deleteProject by remember { mutableStateOf<ProjectSummary?>(null) }
     var exportProject by remember { mutableStateOf<ProjectSummary?>(null) }
+    var exportPickerProject by remember { mutableStateOf<ProjectSummary?>(null) }
     var incompleteExport by remember { mutableStateOf<Pair<ProjectSummary, ExportFormat>?>(null) }
     var infoTab by remember { mutableStateOf(InfoTab.Mtz) }
     var rootTabIndex by rememberSaveable { mutableStateOf(rootScreenIndex(Screen.Projects)) }
@@ -187,16 +190,34 @@ private fun IconEditorApp(
     val installedAppsPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
-        viewModel.preloadInstalledApps(forceRefresh = granted)
+        viewModel.preloadInstalledApps(forceRefresh = true)
+        if (!granted) {
+            viewModel.notifyInstalledAppsPermissionDenied()
+        }
     }
-    LaunchedEffect(context, viewModel) {
-        if (context.supportsInstalledAppsRuntimePermission() &&
+    fun requestInstalledAppsAccessIfNeeded() {
+        if (context.requiresInstalledAppsPermission() &&
             context.checkSelfPermission(InstalledAppsPermission) != PackageManager.PERMISSION_GRANTED
         ) {
             installedAppsPermissionLauncher.launch(InstalledAppsPermission)
         } else {
             viewModel.preloadInstalledApps()
         }
+    }
+    fun onIconPreferencesChanged(preferences: IconPreferences) {
+        val enablingInstalledApps =
+            (!viewModel.iconPreferences.showLocalApps && preferences.showLocalApps) ||
+                (!viewModel.iconPreferences.showSystemApps && preferences.showSystemApps)
+        viewModel.updateIconPreferences(preferences)
+        if (enablingInstalledApps &&
+            context.requiresInstalledAppsPermission() &&
+            context.checkSelfPermission(InstalledAppsPermission) != PackageManager.PERMISSION_GRANTED
+        ) {
+            installedAppsPermissionLauncher.launch(InstalledAppsPermission)
+        }
+    }
+    LaunchedEffect(context, viewModel) {
+        requestInstalledAppsAccessIfNeeded()
     }
     val importLauncher = rememberLauncherForActivityResult(OpenProjectDocument()) { uri ->
         uri?.let {
@@ -215,9 +236,9 @@ private fun IconEditorApp(
             initialDirectory = ExportDirectoryHelper.initialDocumentUri(viewModel.settings),
         ),
     ) { uri ->
-        val project = exportProject
+        val project = exportPickerProject
         if (uri != null && project != null) viewModel.exportProject(project.id, ExportFormat.Mtz, uri)
-        exportProject = null
+        exportPickerProject = null
     }
     val zipExportLauncher = rememberLauncherForActivityResult(
         CreateExportDocument(
@@ -225,9 +246,9 @@ private fun IconEditorApp(
             initialDirectory = ExportDirectoryHelper.initialDocumentUri(viewModel.settings),
         ),
     ) { uri ->
-        val project = exportProject
+        val project = exportPickerProject
         if (uri != null && project != null) viewModel.exportProject(project.id, ExportFormat.ModuleZip, uri)
-        exportProject = null
+        exportPickerProject = null
     }
     val apkExportLauncher = rememberLauncherForActivityResult(
         CreateExportDocument(
@@ -235,9 +256,9 @@ private fun IconEditorApp(
             initialDirectory = ExportDirectoryHelper.initialDocumentUri(viewModel.settings),
         ),
     ) { uri ->
-        val project = exportProject
+        val project = exportPickerProject
         if (uri != null && project != null) viewModel.exportProject(project.id, ExportFormat.Apk, uri)
-        exportProject = null
+        exportPickerProject = null
     }
     val scrollBehavior = MiuixScrollBehavior()
     LaunchedEffect(rootPagerState) {
@@ -297,7 +318,7 @@ private fun IconEditorApp(
                                     miuixBackdrop = miuixBackdrop,
                                     floatingBackdrop = floatingBackdrop,
                                     iconPreferences = viewModel.iconPreferences,
-                                    onIconPreferences = viewModel::updateIconPreferences,
+                                    onIconPreferences = ::onIconPreferencesChanged,
                                     onSettings = viewModel::updateSettings,
                                     onCreateProject = viewModel::createProject,
                                     onImportProject = {
@@ -340,7 +361,7 @@ private fun IconEditorApp(
                                     scrollBehavior = scrollBehavior,
                                     blurEnabled = viewModel.settings.blurEnabled,
                                     iconPreferences = viewModel.iconPreferences,
-                                    onIconPreferences = viewModel::updateIconPreferences,
+                                    onIconPreferences = ::onIconPreferencesChanged,
                                     onBack = ::navigateBack,
                                     onCreateProject = viewModel::createProject,
                                     infoTab = infoTab,
@@ -361,7 +382,7 @@ private fun IconEditorApp(
                                     scrollBehavior = scrollBehavior,
                                     blurEnabled = viewModel.settings.blurEnabled,
                                     iconPreferences = viewModel.iconPreferences,
-                                    onIconPreferences = viewModel::updateIconPreferences,
+                                    onIconPreferences = ::onIconPreferencesChanged,
                                     onBack = ::navigateBack,
                                     onCreateProject = viewModel::createProject,
                                 ) { contentPadding ->
@@ -388,7 +409,7 @@ private fun IconEditorApp(
                                     scrollBehavior = scrollBehavior,
                                     blurEnabled = viewModel.settings.blurEnabled,
                                     iconPreferences = viewModel.iconPreferences,
-                                    onIconPreferences = viewModel::updateIconPreferences,
+                                    onIconPreferences = ::onIconPreferencesChanged,
                                     onBack = ::navigateBack,
                                     onCreateProject = viewModel::createProject,
                                 ) { contentPadding ->
@@ -445,7 +466,7 @@ private fun IconEditorApp(
                                 locationLabel = target.locationLabel,
                             )
                         } else {
-                            exportProject = project
+                            exportPickerProject = project
                             when (format) {
                                 ExportFormat.Mtz -> mtzExportLauncher.launch(fileName)
                                 ExportFormat.ModuleZip -> zipExportLauncher.launch(fileName)
@@ -481,16 +502,67 @@ private fun IconEditorApp(
                 ImportProgressOverlay(progress = viewModel.importProgress)
                 ExportProgressOverlay(
                     progress = viewModel.exportProgress,
-                    onDismiss = viewModel::dismissExportProgress,
+                    installUri = viewModel.pendingApkInstallUri,
+                    onDismiss = {
+                        viewModel.clearPendingApkInstall()
+                        viewModel.dismissExportProgress()
+                    },
+                    onInstall = { uri ->
+                        if (installExportedApk(context, uri)) {
+                            viewModel.clearPendingApkInstall()
+                            viewModel.dismissExportProgress()
+                        }
+                    },
                 )
             }
         }
     }
 }
 
-private fun Context.supportsInstalledAppsRuntimePermission(): Boolean = runCatching {
-    packageManager.getPermissionInfo(InstalledAppsPermission, 0).packageName == MiuiSecurityPackage
+private fun Context.requiresInstalledAppsPermission(): Boolean = runCatching {
+    // MIUI/HyperOS, ColorOS/OxygenOS and other OEM builds expose this runtime permission.
+    // Only requesting it when owned by MIUI caused ColorOS devices to never prompt,
+    // leaving getInstalledApplications() with a near-empty result.
+    packageManager.getPermissionInfo(InstalledAppsPermission, 0)
+    true
 }.getOrDefault(false)
+
+private fun installExportedApk(context: Context, uri: Uri): Boolean {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+        !context.packageManager.canRequestPackageInstalls()
+    ) {
+        runCatching {
+            context.startActivity(
+                Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES)
+                    .setData(Uri.parse("package:${context.packageName}"))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        }
+        Toast.makeText(
+            context,
+            context.getString(R.string.export_apk_install_permission),
+            Toast.LENGTH_LONG,
+        ).show()
+        return false
+    }
+    val installed = runCatching {
+        context.startActivity(
+            Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "application/vnd.android.package-archive")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            },
+        )
+    }.isSuccess
+    if (!installed) {
+        Toast.makeText(
+            context,
+            context.getString(R.string.export_apk_install_failed),
+            Toast.LENGTH_SHORT,
+        ).show()
+    }
+    return installed
+}
 
 private fun Intent.projectUri(): Uri? = when (action) {
     Intent.ACTION_VIEW -> data
