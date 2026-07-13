@@ -102,6 +102,8 @@ class ApkIconPackImporter(private val context: Context) {
 
         if (importedCount == 0) throw InvalidIconPackApkException()
 
+        extractApkLauncherAndMask(apkFile, workDir, loadedResources)
+
         val mappingIndex = IconMappingBridge.toMappingIndex(
             deduped = deduped,
             zipPaths = deduped.associate { mapping ->
@@ -252,6 +254,52 @@ class ApkIconPackImporter(private val context: Context) {
         drawable.draw(canvas)
         return bitmap
     }
+
+    private fun extractApkLauncherAndMask(
+        apkFile: File,
+        workDir: File,
+        loaded: LoadedApkResources,
+    ) {
+        val apkDir = File(workDir, "apk").also { it.mkdirs() }
+        val iconRoot = File(workDir, "icons/res/drawable-xxhdpi").also { it.mkdirs() }
+        loadApplicationIconBitmap(apkFile)?.let { bitmap ->
+            File(apkDir, "ic_launcher.png").outputStream().use { output ->
+                bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)
+            }
+        }
+        fun saveLayer(fileName: String, bitmap: Bitmap?) {
+            if (bitmap == null) return
+            File(iconRoot, "$fileName.png").outputStream().use { output ->
+                bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)
+            }
+        }
+        saveLayer(
+            "iconback",
+            loadDrawableBitmap(apkFile, loaded, "iconback", zipPath = null)
+                ?: loadBitmapFromZip(apkFile, "assets/iconback.png"),
+        )
+        saveLayer(
+            "iconmask",
+            loadDrawableBitmap(apkFile, loaded, "iconmask", zipPath = null)
+                ?: loadDrawableBitmap(apkFile, loaded, "icon_mask", zipPath = null)
+                ?: loadBitmapFromZip(apkFile, "assets/iconmask.png")
+                ?: loadBitmapFromZip(apkFile, "assets/mask.png")
+                ?: loadBitmapFromZip(apkFile, "assets/icon_mask.png"),
+        )
+        saveLayer(
+            "iconupon",
+            loadDrawableBitmap(apkFile, loaded, "iconupon", zipPath = null)
+                ?: loadBitmapFromZip(apkFile, "assets/iconupon.png"),
+        )
+    }
+
+    private fun loadApplicationIconBitmap(apkFile: File): Bitmap? = runCatching {
+        val packageInfo = context.packageManager.getPackageArchiveInfo(apkFile.absolutePath, 0)
+        val appInfo = packageInfo?.applicationInfo ?: return null
+        appInfo.sourceDir = apkFile.absolutePath
+        appInfo.publicSourceDir = apkFile.absolutePath
+        drawableToBitmap(context.packageManager.getApplicationIcon(appInfo))
+    }.getOrNull()
 
     private fun readApkInfo(apkFile: File): ApkInfo {
         val packageInfo = context.packageManager.getPackageArchiveInfo(apkFile.absolutePath, 0)

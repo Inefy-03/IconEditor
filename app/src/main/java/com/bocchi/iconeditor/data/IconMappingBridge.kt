@@ -204,6 +204,32 @@ object IconMappingBridge {
         )
     }
 
+    /**
+     * Prefer mapping details from an incoming pack (especially APK drawable names / components)
+     * for packages that were actually imported, then keep other existing entries untouched.
+     */
+    fun preferIncomingMappings(
+        existing: IconMappingIndex,
+        incoming: IconMappingIndex,
+        packages: Set<String>,
+    ): IconMappingIndex {
+        if (packages.isEmpty()) return existing
+        val merged = existing.entries.associateBy { it.packageName }.toMutableMap()
+        val incomingByPackage = incoming.entries.associateBy { it.packageName }
+        for (packageName in packages) {
+            val next = incomingByPackage[packageName] ?: continue
+            val previous = merged[packageName]
+            merged[packageName] = IconMappingEntry(
+                packageName = packageName,
+                drawableName = next.drawableName.ifBlank { previous?.drawableName.orEmpty() },
+                components = next.components.takeIf { it.isNotEmpty() }
+                    ?: previous?.components.orEmpty(),
+                resourceZipPath = next.resourceZipPath ?: previous?.resourceZipPath,
+            )
+        }
+        return IconMappingIndex(entries = merged.values.sortedBy { it.packageName })
+    }
+
     fun buildAppfilterXml(mappings: List<IconMappingEntry>): String {
         val doc = DocumentBuilderFactory.newInstance().newDocumentBuilder().newDocument()
         val root = doc.createElement("resources")

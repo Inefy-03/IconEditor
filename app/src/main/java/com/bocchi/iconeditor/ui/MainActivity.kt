@@ -52,6 +52,7 @@ import androidx.navigation3.runtime.rememberNavBackStack
 import com.bocchi.iconeditor.model.AppSettings
 import com.bocchi.iconeditor.R
 import com.bocchi.iconeditor.model.ExportFormat
+import com.bocchi.iconeditor.model.IconImportMode
 import com.bocchi.iconeditor.model.IconPreferences
 import com.bocchi.iconeditor.model.InfoTab
 import com.bocchi.iconeditor.model.ProjectSummary
@@ -61,12 +62,14 @@ import com.bocchi.iconeditor.ui.component.AppTopBar
 import com.bocchi.iconeditor.ui.component.ConfirmDeleteDialog
 import com.bocchi.iconeditor.ui.component.ExportDialog
 import com.bocchi.iconeditor.ui.component.ExportValidationDialog
+import com.bocchi.iconeditor.ui.component.IconImportConfirmDialog
 import com.bocchi.iconeditor.ui.component.MainBottomBar
 import com.bocchi.iconeditor.ui.component.MainNavigationRail
 import com.bocchi.iconeditor.ui.component.MessageDialog
 import com.bocchi.iconeditor.ui.component.RootPagerContent
 import com.bocchi.iconeditor.ui.component.Screen
 import com.bocchi.iconeditor.ui.component.appPageBackground
+import com.bocchi.iconeditor.data.ApkPackAssets
 import com.bocchi.iconeditor.data.ExportDirectoryHelper
 import com.bocchi.iconeditor.data.ImportSourceDetector
 import com.bocchi.iconeditor.ui.component.rememberMiuixBlurBackdrop
@@ -107,6 +110,13 @@ internal val ProjectImportMimeTypes = listOf(
 )
 internal const val ProjectImportPrimaryMimeType = "application/zip"
 private const val InstalledAppsPermission = "com.android.permission.GET_INSTALLED_APPS"
+
+private enum class ApkAssetPickTarget {
+    LauncherIcon,
+    IconBack,
+    IconMask,
+    IconUpon,
+}
 
 private class OpenProjectDocument : ActivityResultContracts.OpenDocument() {
     override fun createIntent(context: Context, input: Array<String>): Intent =
@@ -230,6 +240,17 @@ private fun IconEditorApp(
             viewModel.importProject(it, ImportSourceDetector.resolveDisplayName(context, it))
         }
     }
+    val iconPackImportLauncher = rememberLauncherForActivityResult(OpenProjectDocument()) { uri ->
+        uri?.let {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    it,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
+            }
+            viewModel.previewIconsFromPack(it)
+        }
+    }
     val mtzExportLauncher = rememberLauncherForActivityResult(
         CreateExportDocument(
             mimeType = "application/octet-stream",
@@ -259,6 +280,21 @@ private fun IconEditorApp(
         val project = exportPickerProject
         if (uri != null && project != null) viewModel.exportProject(project.id, ExportFormat.Apk, uri)
         exportPickerProject = null
+    }
+    var apkAssetPickTarget by remember { mutableStateOf<ApkAssetPickTarget?>(null) }
+    val apkAssetPickLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        val target = apkAssetPickTarget
+        apkAssetPickTarget = null
+        if (uri != null && target != null) {
+            when (target) {
+                ApkAssetPickTarget.LauncherIcon -> viewModel.setApkLauncherIcon(uri)
+                ApkAssetPickTarget.IconBack -> viewModel.setApkMaskLayer(ApkPackAssets.MaskLayer.Back, uri)
+                ApkAssetPickTarget.IconMask -> viewModel.setApkMaskLayer(ApkPackAssets.MaskLayer.Mask, uri)
+                ApkAssetPickTarget.IconUpon -> viewModel.setApkMaskLayer(ApkPackAssets.MaskLayer.Upon, uri)
+            }
+        }
     }
     val scrollBehavior = MiuixScrollBehavior()
     LaunchedEffect(rootPagerState) {
@@ -374,6 +410,36 @@ private fun IconEditorApp(
                                         onSaveMtz = viewModel::saveMtzInfo,
                                         onSaveModule = viewModel::saveModuleInfo,
                                         onSaveApk = viewModel::saveApkInfo,
+                                        launcherIconFile = viewModel.apkLauncherIconFile(),
+                                        iconBackFile = viewModel.apkMaskLayerFile(ApkPackAssets.MaskLayer.Back),
+                                        iconMaskFile = viewModel.apkMaskLayerFile(ApkPackAssets.MaskLayer.Mask),
+                                        iconUponFile = viewModel.apkMaskLayerFile(ApkPackAssets.MaskLayer.Upon),
+                                        onPickLauncherIcon = {
+                                            apkAssetPickTarget = ApkAssetPickTarget.LauncherIcon
+                                            apkAssetPickLauncher.launch(arrayOf("image/*"))
+                                        },
+                                        onClearLauncherIcon = viewModel::clearApkLauncherIcon,
+                                        onPickIconBack = {
+                                            apkAssetPickTarget = ApkAssetPickTarget.IconBack
+                                            apkAssetPickLauncher.launch(arrayOf("image/*"))
+                                        },
+                                        onClearIconBack = {
+                                            viewModel.clearApkMaskLayer(ApkPackAssets.MaskLayer.Back)
+                                        },
+                                        onPickIconMask = {
+                                            apkAssetPickTarget = ApkAssetPickTarget.IconMask
+                                            apkAssetPickLauncher.launch(arrayOf("image/*"))
+                                        },
+                                        onClearIconMask = {
+                                            viewModel.clearApkMaskLayer(ApkPackAssets.MaskLayer.Mask)
+                                        },
+                                        onPickIconUpon = {
+                                            apkAssetPickTarget = ApkAssetPickTarget.IconUpon
+                                            apkAssetPickLauncher.launch(arrayOf("image/*"))
+                                        },
+                                        onClearIconUpon = {
+                                            viewModel.clearApkMaskLayer(ApkPackAssets.MaskLayer.Upon)
+                                        },
                                     )
                                 }
                                 Screen.Icons -> SecondaryScene(
@@ -385,6 +451,9 @@ private fun IconEditorApp(
                                     onIconPreferences = ::onIconPreferencesChanged,
                                     onBack = ::navigateBack,
                                     onCreateProject = viewModel::createProject,
+                                    onImportIcons = {
+                                        iconPackImportLauncher.launch(ProjectImportMimeTypes.toTypedArray())
+                                    },
                                 ) { contentPadding ->
                                     IconEditPage(
                                         items = viewModel.visibleIconItems(),
@@ -498,6 +567,16 @@ private fun IconEditorApp(
                     title = viewModel.message?.title,
                     message = viewModel.message?.summary,
                     onDismiss = viewModel::clearMessage,
+                )
+                IconImportConfirmDialog(
+                    preview = viewModel.iconImportPreview,
+                    iconFile = viewModel::iconImportCandidateFile,
+                    onToggle = viewModel::toggleIconImportSelection,
+                    onSelectAll = { viewModel.setAllIconImportSelection(true) },
+                    onSelectNone = { viewModel.setAllIconImportSelection(false) },
+                    onDismiss = viewModel::dismissIconImportPreview,
+                    onOverwrite = { viewModel.applyIconImport(IconImportMode.Overwrite) },
+                    onAddOnly = { viewModel.applyIconImport(IconImportMode.AddOnly) },
                 )
                 ImportProgressOverlay(progress = viewModel.importProgress)
                 ExportProgressOverlay(
@@ -753,6 +832,7 @@ private fun SecondaryScene(
     onCreateProject: () -> Unit,
     infoTab: InfoTab = InfoTab.Mtz,
     onInfoTab: (InfoTab) -> Unit = {},
+    onImportIcons: () -> Unit = {},
     content: @Composable (PaddingValues) -> Unit,
 ) {
     val topBarBackdrop = rememberMiuixBlurBackdrop(blurEnabled)
@@ -770,6 +850,7 @@ private fun SecondaryScene(
                 onIconPreferences = onIconPreferences,
                 infoTab = infoTab,
                 onInfoTab = onInfoTab,
+                onImportIcons = onImportIcons,
             )
         },
         containerColor = pageBackground,

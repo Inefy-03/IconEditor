@@ -147,6 +147,33 @@ data class IconMappingIndex(
     val entries: List<IconMappingEntry> = emptyList(),
 )
 
+enum class IconImportMode {
+    Overwrite,
+    AddOnly,
+}
+
+data class IconImportCandidate(
+    val packageName: String,
+    val appName: String,
+    val iconArchivePath: String,
+    val conflict: Boolean,
+    val selected: Boolean = true,
+)
+
+data class IconImportPreview(
+    val stagingId: String,
+    val sourceType: SourceType,
+    val displayName: String,
+    val items: List<IconImportCandidate>,
+) {
+    val totalIncoming: Int get() = items.size
+    val conflictCount: Int get() = items.count { it.conflict }
+    val newCount: Int get() = items.count { !it.conflict }
+    val selectedCount: Int get() = items.count { it.selected }
+    val selectedConflictCount: Int get() = items.count { it.selected && it.conflict }
+    val selectedNewCount: Int get() = items.count { it.selected && !it.conflict }
+}
+
 @Serializable
 data class IconPreferences(
     val search: String = "",

@@ -11,6 +11,23 @@
     <string name="about_github">GitHub</string>
     <string name="about_github_desc">查看项目源码</string>
 
+    <string name="action_import_icons">导入图标包</string>
+    <string name="icon_import_title">导入图标</string>
+    <string name="icon_import_summary">来源：%1$s（%2$s）\n共解析 %3$d 个 · 冲突 %4$d · 新增 %5$d · 已选 %6$d\n勾选要导入的应用后选择导入方式</string>
+    <string name="icon_import_source_apk">APK 图标包</string>
+    <string name="icon_import_source_mtz">MTZ 主题</string>
+    <string name="icon_import_source_module">Module</string>
+    <string name="icon_import_overwrite">覆盖导入所选</string>
+    <string name="icon_import_add_only">仅新增所选</string>
+    <string name="icon_import_select_all">全选</string>
+    <string name="icon_import_select_none">全不选</string>
+    <string name="icon_import_tag_conflict">冲突</string>
+    <string name="icon_import_tag_new">新增</string>
+    <string name="icon_import_done_title">导入完成</string>
+    <string name="icon_import_done_overwrite">已覆盖/写入 %1$d 个应用图标</string>
+    <string name="icon_import_done_add_only">已新增 %1$d 个应用图标</string>
+    <string name="icon_import_staging_missing">导入缓存已失效，请重新选择文件</string>
+    <string name="icon_import_nothing_selected">请至少勾选一个应用图标</string>
     <string name="action_import_project">导入项目</string>
     <string name="action_edit_info">编辑信息</string>
     <string name="action_edit_icons">编辑图标</string>
@@ -47,6 +64,19 @@
     <string name="tab_module_info">Module</string>
     <string name="tab_apk_info">APK</string>
     <string name="module_install_messages">Module installation messages</string>
+    <string name="apk_launcher_icon">APK 应用图标</string>
+    <string name="apk_launcher_icon_hint">用于图标包安装后的桌面图标</string>
+    <string name="apk_mask_layers">图标遮罩层</string>
+    <string name="apk_mask_pick">点击选择图片</string>
+    <string name="apk_mask_back_desc">未适配图标背景</string>
+    <string name="apk_mask_mask_desc">图标遮罩</string>
+    <string name="apk_mask_upon_desc">前景覆盖 (可选)</string>
+    <string name="apk_mask_back_footer">iconback (背景)</string>
+    <string name="apk_mask_mask_footer">iconmask (遮罩)</string>
+    <string name="apk_mask_upon_footer">iconupon (前景)</string>
+    <string name="apk_asset_pick">选择图片</string>
+    <string name="apk_asset_clear">清除</string>
+    <string name="apk_asset_empty">未设置</string>
 
     <string name="empty_projects">没有项目</string>
     <string name="empty_icons">没有图标</string>

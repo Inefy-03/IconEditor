@@ -23,6 +23,26 @@ import kotlin.math.min
  * - `--no-crunch`：跳过 PNG 再压缩（图标已是成品 PNG）
  * - 多进程分片并行 compile（利用多核）
  */
+/**
+ * APK 桌面图标与 MIUI 风格三层遮罩资源路径。
+ * 遮罩层写入 icons/drawable-xxhdpi，以便 MTZ/Module 导出一并生效。
+ */
+object ApkPackAssets {
+    const val LAUNCHER_ICON_PATH = "apk/ic_launcher.png"
+    const val LEGACY_MASK_PATH = "apk/icon_mask.png"
+
+    enum class MaskLayer(val resourceName: String, val relativePath: String) {
+        Back("iconback", "icons/res/drawable-xxhdpi/iconback.png"),
+        Mask("iconmask", "icons/res/drawable-xxhdpi/iconmask.png"),
+        Upon("iconupon", "icons/res/drawable-xxhdpi/iconupon.png"),
+        ;
+
+        companion object {
+            val resourceNames: Set<String> = entries.map { it.resourceName }.toSet()
+        }
+    }
+}
+
 object Aapt2IconPackCompiler {
     private const val DRAWABLE_SHARD_SIZE = 120
     private const val MAX_COMPILE_WORKERS = 8
@@ -109,12 +129,31 @@ object Aapt2IconPackCompiler {
         File(resRoot, "values").mkdirs()
         val assetsDir = File(stagingRoot, "assets").apply { mkdirs() }
 
-        File(stagingRoot, "AndroidManifest.xml").writeText(IconPackManifestBuilder.build(apkInfo))
+        val launcherIcon = File(workDir, ApkPackAssets.LAUNCHER_ICON_PATH).takeIf { it.isFile }
+        migrateLegacyMaskIfNeeded(workDir)
+        val maskLayers = ApkPackAssets.MaskLayer.entries.mapNotNull { layer ->
+            File(workDir, layer.relativePath).takeIf { it.isFile }?.let { layer to it }
+        }
+        File(stagingRoot, "AndroidManifest.xml").writeText(
+            IconPackManifestBuilder.build(apkInfo, hasLauncherIcon = launcherIcon != null),
+        )
         File(resRoot, "values/strings.xml").writeText(IconPackManifestBuilder.buildStringsXml(apkInfo))
         File(resRoot, "xml/appfilter.xml").writeText(appfilter)
         File(resRoot, "xml/drawable.xml").writeText(drawableXml)
         File(assetsDir, "appfilter.xml").writeText(appfilter)
         File(assetsDir, "drawable.xml").writeText(drawableXml)
+        if (launcherIcon != null) {
+            hardLinkOrCopy(launcherIcon, File(resRoot, "drawable-nodpi/ic_launcher.png"))
+            reporter.log("已写入 APK 应用图标 ic_launcher")
+        }
+        maskLayers.forEach { (layer, file) ->
+            hardLinkOrCopy(file, File(resRoot, "drawable-nodpi/${layer.resourceName}.png"))
+            hardLinkOrCopy(file, File(assetsDir, "${layer.resourceName}.png"))
+            if (layer == ApkPackAssets.MaskLayer.Mask) {
+                hardLinkOrCopy(file, File(assetsDir, "mask.png"))
+            }
+            reporter.log("已写入遮罩层 ${layer.resourceName}")
+        }
         reporter.log("已写入 appfilter.xml / drawable.xml（res + assets）")
 
         val packable = mapping.filter { it.drawableName.isNotBlank() }
@@ -260,6 +299,15 @@ object Aapt2IconPackCompiler {
         }
         reporter.log("aapt2 compile 全部完成：${archives.size} 个资源包")
         return archives
+    }
+
+    private fun migrateLegacyMaskIfNeeded(workDir: File) {
+        val legacy = File(workDir, ApkPackAssets.LEGACY_MASK_PATH)
+        val target = File(workDir, ApkPackAssets.MaskLayer.Mask.relativePath)
+        if (legacy.isFile && !target.isFile) {
+            target.parentFile?.mkdirs()
+            legacy.copyTo(target, overwrite = false)
+        }
     }
 
     private fun hardLinkOrCopy(source: File, target: File) {

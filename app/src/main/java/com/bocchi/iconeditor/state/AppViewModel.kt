@@ -10,6 +10,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.bocchi.iconeditor.R
+import com.bocchi.iconeditor.data.ApkPackAssets
 import com.bocchi.iconeditor.data.InvalidIconPackApkException
 import com.bocchi.iconeditor.data.InvalidProjectArchiveException
 import com.bocchi.iconeditor.data.ProjectRepository
@@ -20,6 +21,9 @@ import com.bocchi.iconeditor.model.ExportFormat
 import com.bocchi.iconeditor.model.ExportPhase
 import com.bocchi.iconeditor.model.ExportProgress
 import com.bocchi.iconeditor.model.IconAsset
+import com.bocchi.iconeditor.model.IconImportCandidate
+import com.bocchi.iconeditor.model.IconImportMode
+import com.bocchi.iconeditor.model.IconImportPreview
 import com.bocchi.iconeditor.model.IconListItem
 import com.bocchi.iconeditor.model.IconPreferences
 import com.bocchi.iconeditor.model.ImportProgress
@@ -29,6 +33,7 @@ import com.bocchi.iconeditor.model.MtzInfo
 import com.bocchi.iconeditor.model.ProjectMetadata
 import com.bocchi.iconeditor.model.ProjectSummary
 import com.bocchi.iconeditor.model.SortField
+import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.Dispatchers
@@ -69,6 +74,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         private set
     var importProgress by mutableStateOf<ImportProgress?>(null)
         private set
+    var iconImportPreview by mutableStateOf<IconImportPreview?>(null)
+        private set
     var isExporting by mutableStateOf(false)
         private set
     var exportProgress by mutableStateOf<ExportProgress?>(null)
@@ -76,6 +83,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     var pendingApkInstallUri by mutableStateOf<Uri?>(null)
         private set
     var projectsScrollToTopRequest by mutableIntStateOf(0)
+        private set
+    var apkAssetsRevision by mutableIntStateOf(0)
         private set
 
     private val initializationJob: Job
@@ -174,6 +183,157 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun previewIconsFromPack(uri: Uri) {
+        val projectId = selectedProjectId ?: return
+        viewModelScope.launch {
+            initializationJob.join()
+            iconImportPreview?.let { discard ->
+                withContext(Dispatchers.IO) {
+                    repository.discardIconImportStaging(discard.stagingId)
+                }
+            }
+            iconImportPreview = null
+            isImporting = true
+            importProgress = ImportProgress(com.bocchi.iconeditor.model.ImportPhase.Copying)
+            val progressChannel = Channel<ImportProgress>(Channel.CONFLATED)
+            val progressCollector = launch(Dispatchers.Main.immediate) {
+                for (progress in progressChannel) {
+                    importProgress = progress
+                }
+            }
+            runCatching {
+                val preview = withContext(Dispatchers.IO) {
+                    packageNameRepository.ensureLoaded()
+                    val staged = repository.previewIconsFromPack(projectId, uri) { progress ->
+                        progressChannel.trySend(progress)
+                    }
+                    val localByPackage = localApps.associateBy { it.packageName }
+                    staged.copy(
+                        items = staged.items.map { item ->
+                            val resolved = packageNameRepository.resolveAppName(
+                                packageName = item.packageName,
+                                localAppName = localByPackage[item.packageName]?.appName
+                                    ?: item.appName.takeIf { it != item.packageName },
+                            )
+                            item.copy(appName = resolved)
+                        }.sortedWith(
+                            compareByDescending<IconImportCandidate> { it.conflict }
+                                .thenBy(String.CASE_INSENSITIVE_ORDER) { it.appName },
+                        ),
+                    )
+                }
+                iconImportPreview = preview
+            }.onFailure { error ->
+                if (error is CancellationException) throw error
+                if (error is InvalidProjectArchiveException || error is InvalidIconPackApkException) {
+                    showMessage(
+                        R.string.import_failed_title,
+                        getApplication<Application>().getString(R.string.import_invalid_file),
+                    )
+                } else {
+                    showError(error)
+                }
+            }
+            progressChannel.close()
+            progressCollector.join()
+            isImporting = false
+            importProgress = null
+        }
+    }
+
+    fun dismissIconImportPreview() {
+        val preview = iconImportPreview
+        iconImportPreview = null
+        if (preview != null) {
+            viewModelScope.launch(Dispatchers.IO) {
+                repository.discardIconImportStaging(preview.stagingId)
+            }
+        }
+    }
+
+    fun toggleIconImportSelection(packageName: String) {
+        val preview = iconImportPreview ?: return
+        iconImportPreview = preview.copy(
+            items = preview.items.map { item ->
+                if (item.packageName == packageName) item.copy(selected = !item.selected) else item
+            },
+        )
+    }
+
+    fun setAllIconImportSelection(selected: Boolean) {
+        val preview = iconImportPreview ?: return
+        iconImportPreview = preview.copy(
+            items = preview.items.map { it.copy(selected = selected) },
+        )
+    }
+
+    fun iconImportCandidateFile(candidate: IconImportCandidate): java.io.File? {
+        val preview = iconImportPreview ?: return null
+        return repository.iconImportCandidateFile(preview.stagingId, candidate.iconArchivePath)
+            .takeIf { it.isFile }
+    }
+
+    fun applyIconImport(mode: IconImportMode) {
+        val projectId = selectedProjectId ?: return
+        val preview = iconImportPreview ?: return
+        val selectedPackages = preview.items.filter { it.selected }.map { it.packageName }.toSet()
+        if (selectedPackages.isEmpty()) {
+            showMessage(
+                R.string.dialog_notice,
+                getApplication<Application>().getString(R.string.icon_import_nothing_selected),
+            )
+            return
+        }
+        iconImportPreview = null
+        viewModelScope.launch {
+            isImporting = true
+            importProgress = ImportProgress(com.bocchi.iconeditor.model.ImportPhase.Copying)
+            val progressChannel = Channel<ImportProgress>(Channel.CONFLATED)
+            val progressCollector = launch(Dispatchers.Main.immediate) {
+                for (progress in progressChannel) {
+                    importProgress = progress
+                }
+            }
+            runCatching {
+                val appliedCount = withContext(Dispatchers.IO) {
+                    repository.applyIconImport(
+                        projectId = projectId,
+                        preview = preview,
+                        mode = mode,
+                        selectedPackages = selectedPackages,
+                    ) { progress ->
+                        progressChannel.trySend(progress)
+                    }
+                    when (mode) {
+                        IconImportMode.Overwrite -> selectedPackages.size
+                        IconImportMode.AddOnly -> preview.items.count { it.selected && !it.conflict }
+                    }
+                }
+                loadProject(projectId, loadIcons = true)
+                refresh()
+                val message = when (mode) {
+                    IconImportMode.Overwrite -> getApplication<Application>().getString(
+                        R.string.icon_import_done_overwrite,
+                        appliedCount,
+                    )
+                    IconImportMode.AddOnly -> getApplication<Application>().getString(
+                        R.string.icon_import_done_add_only,
+                        appliedCount,
+                    )
+                }
+                showMessage(R.string.icon_import_done_title, message)
+            }.onFailure { error ->
+                if (error is CancellationException) throw error
+                repository.discardIconImportStaging(preview.stagingId)
+                showError(error)
+            }
+            progressChannel.close()
+            progressCollector.join()
+            isImporting = false
+            importProgress = null
+        }
+    }
+
     fun deleteProject(id: String) = runAction {
         repository.deleteProject(id)
         if (selectedProjectId == id) selectedProjectId = null
@@ -210,6 +370,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 if (selectedProjectId != id) return@launch
                 metadata = loaded.metadata
                 iconPreferences = loaded.preferences
+                apkAssetsRevision++
                 if (loadIcons) {
                     icons = loaded.icons
                     localApps = loaded.localApps
@@ -246,6 +407,49 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         selectedProjectId?.let {
             metadata = metadata.copy(apk = info)
             repository.saveMetadata(it, metadata)
+            refresh()
+        }
+    }
+
+    fun apkLauncherIconFile(): File? {
+        // Read revision so Compose observers recompose after replace/clear.
+        apkAssetsRevision
+        return selectedProjectId?.let { repository.apkLauncherIconFile(it) }
+    }
+
+    fun apkMaskLayerFile(layer: ApkPackAssets.MaskLayer): File? {
+        apkAssetsRevision
+        return selectedProjectId?.let { repository.apkMaskLayerFile(it, layer) }
+    }
+
+    fun setApkLauncherIcon(uri: Uri) = runAction {
+        selectedProjectId?.let {
+            repository.setApkLauncherIcon(it, uri)
+            apkAssetsRevision++
+            refresh()
+        }
+    }
+
+    fun setApkMaskLayer(layer: ApkPackAssets.MaskLayer, uri: Uri) = runAction {
+        selectedProjectId?.let {
+            repository.setApkMaskLayer(it, layer, uri)
+            apkAssetsRevision++
+            refresh()
+        }
+    }
+
+    fun clearApkLauncherIcon() = runAction {
+        selectedProjectId?.let {
+            repository.clearApkLauncherIcon(it)
+            apkAssetsRevision++
+            refresh()
+        }
+    }
+
+    fun clearApkMaskLayer(layer: ApkPackAssets.MaskLayer) = runAction {
+        selectedProjectId?.let {
+            repository.clearApkMaskLayer(it, layer)
+            apkAssetsRevision++
             refresh()
         }
     }

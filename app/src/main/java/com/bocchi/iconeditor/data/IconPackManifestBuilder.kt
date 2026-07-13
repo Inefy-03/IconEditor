@@ -7,12 +7,19 @@ import com.bocchi.iconeditor.model.ApkInfo
  * hasCode=false，通过 Activity intent-filter 声明图标包能力。
  */
 object IconPackManifestBuilder {
-    fun build(apkInfo: ApkInfo): String {
+    fun build(apkInfo: ApkInfo, hasLauncherIcon: Boolean = false): String {
         val packageName = apkInfo.packageName.trim()
         require(packageName.isNotBlank()) { "APK 包名不能为空" }
         val activityName = "$packageName.IconPackActivity"
         val versionCode = apkInfo.versionCode.coerceAtLeast(1)
         val versionName = escapeXml(apkInfo.versionName.ifBlank { "1.0" })
+        val iconAttrs = if (hasLauncherIcon) {
+            """
+                    android:icon="@drawable/ic_launcher"
+                    android:roundIcon="@drawable/ic_launcher""""
+        } else {
+            ""
+        }
         return """
             <?xml version="1.0" encoding="utf-8"?>
             <manifest xmlns:android="http://schemas.android.com/apk/res/android"
@@ -24,7 +31,7 @@ object IconPackManifestBuilder {
                     android:targetSdkVersion="34" />
                 <application
                     android:hasCode="false"
-                    android:label="@string/app_name">
+                    android:label="@string/app_name"$iconAttrs>
                     <activity
                         android:name="$activityName"
                         android:exported="true"

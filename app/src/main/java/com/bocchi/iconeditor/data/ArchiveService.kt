@@ -122,6 +122,7 @@ object ArchiveService {
                     lastModified = file.lastModified(),
                 )
             }
+            .filter { it.packageName !in ApkPackAssets.MaskLayer.resourceNames }
             .sortedBy { it.packageName }
             .toList()
     }

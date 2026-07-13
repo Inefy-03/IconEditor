@@ -11,6 +11,23 @@
     <string name="about_github">GitHub</string>
     <string name="about_github_desc">View project source</string>
 
+    <string name="action_import_icons">Import icon pack</string>
+    <string name="icon_import_title">Import icons</string>
+    <string name="icon_import_summary">Source: %1$s (%2$s)\nParsed %3$d · Conflicts %4$d · New %5$d · Selected %6$d\nCheck the apps to import, then choose a mode</string>
+    <string name="icon_import_source_apk">APK icon pack</string>
+    <string name="icon_import_source_mtz">MTZ theme</string>
+    <string name="icon_import_source_module">Module</string>
+    <string name="icon_import_overwrite">Overwrite selected</string>
+    <string name="icon_import_add_only">Add selected new only</string>
+    <string name="icon_import_select_all">Select all</string>
+    <string name="icon_import_select_none">Select none</string>
+    <string name="icon_import_tag_conflict">Conflict</string>
+    <string name="icon_import_tag_new">New</string>
+    <string name="icon_import_done_title">Import finished</string>
+    <string name="icon_import_done_overwrite">Wrote/overwrote %1$d app icons</string>
+    <string name="icon_import_done_add_only">Added %1$d new app icons</string>
+    <string name="icon_import_staging_missing">Import cache expired. Please pick the file again</string>
+    <string name="icon_import_nothing_selected">Select at least one app icon</string>
     <string name="action_import_project">Import project</string>
     <string name="action_edit_info">Edit information</string>
     <string name="action_edit_icons">Edit icons</string>
@@ -47,6 +64,19 @@
     <string name="tab_module_info">Module</string>
     <string name="tab_apk_info">APK</string>
     <string name="module_install_messages">Module installation messages</string>
+    <string name="apk_launcher_icon">APK app icon</string>
+    <string name="apk_launcher_icon_hint">Shown as the icon pack launcher icon after install</string>
+    <string name="apk_mask_layers">Icon mask layers</string>
+    <string name="apk_mask_pick">Tap to choose image</string>
+    <string name="apk_mask_back_desc">Unadapted icon background</string>
+    <string name="apk_mask_mask_desc">Icon mask</string>
+    <string name="apk_mask_upon_desc">Foreground overlay (optional)</string>
+    <string name="apk_mask_back_footer">iconback (background)</string>
+    <string name="apk_mask_mask_footer">iconmask (mask)</string>
+    <string name="apk_mask_upon_footer">iconupon (foreground)</string>
+    <string name="apk_asset_pick">Choose image</string>
+    <string name="apk_asset_clear">Clear</string>
+    <string name="apk_asset_empty">Not set</string>
 
     <string name="empty_projects">No projects</string>
     <string name="empty_icons">No icons</string>

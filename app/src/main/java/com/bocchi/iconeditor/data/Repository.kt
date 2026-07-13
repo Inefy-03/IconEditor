@@ -1,6 +1,8 @@
 package com.bocchi.iconeditor.data
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import com.bocchi.iconeditor.R
 import com.bocchi.iconeditor.model.ApkInfo
@@ -9,6 +11,9 @@ import com.bocchi.iconeditor.model.ExportFormat
 import com.bocchi.iconeditor.model.ExportProgress
 import com.bocchi.iconeditor.model.ExportPhase
 import com.bocchi.iconeditor.model.IconAsset
+import com.bocchi.iconeditor.model.IconImportCandidate
+import com.bocchi.iconeditor.model.IconImportMode
+import com.bocchi.iconeditor.model.IconImportPreview
 import com.bocchi.iconeditor.model.IconMappingIndex
 import com.bocchi.iconeditor.model.IconPreferences
 import com.bocchi.iconeditor.model.ProjectIndex
@@ -20,6 +25,7 @@ import com.bocchi.iconeditor.model.ImportProgress
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
+import java.io.FileOutputStream
 import java.util.Base64
 import java.util.UUID
 
@@ -186,6 +192,58 @@ class ProjectRepository(private val context: Context) {
         markDirty(id)
     }
 
+    fun apkLauncherIconFile(id: String): File? =
+        File(workDir(id), ApkPackAssets.LAUNCHER_ICON_PATH).takeIf { it.isFile }
+
+    fun apkMaskLayerFile(id: String, layer: ApkPackAssets.MaskLayer): File? {
+        migrateLegacyMaskIfNeeded(id)
+        return File(workDir(id), layer.relativePath).takeIf { it.isFile }
+    }
+
+    fun setApkLauncherIcon(id: String, uri: Uri) {
+        writeApkPngAsset(id, ApkPackAssets.LAUNCHER_ICON_PATH, uri)
+    }
+
+    fun setApkMaskLayer(id: String, layer: ApkPackAssets.MaskLayer, uri: Uri) {
+        writeApkPngAsset(id, layer.relativePath, uri)
+        if (layer == ApkPackAssets.MaskLayer.Mask) {
+            File(workDir(id), ApkPackAssets.LEGACY_MASK_PATH).delete()
+        }
+    }
+
+    fun clearApkLauncherIcon(id: String) {
+        File(workDir(id), ApkPackAssets.LAUNCHER_ICON_PATH).delete()
+        markDirty(id)
+    }
+
+    fun clearApkMaskLayer(id: String, layer: ApkPackAssets.MaskLayer) {
+        File(workDir(id), layer.relativePath).delete()
+        if (layer == ApkPackAssets.MaskLayer.Mask) {
+            File(workDir(id), ApkPackAssets.LEGACY_MASK_PATH).delete()
+        }
+        markDirty(id)
+    }
+
+    private fun migrateLegacyMaskIfNeeded(id: String) {
+        val legacy = File(workDir(id), ApkPackAssets.LEGACY_MASK_PATH)
+        val target = File(workDir(id), ApkPackAssets.MaskLayer.Mask.relativePath)
+        if (legacy.isFile && !target.isFile) {
+            target.parentFile?.mkdirs()
+            legacy.copyTo(target, overwrite = false)
+        }
+    }
+
+    private fun writeApkPngAsset(id: String, relativePath: String, uri: Uri) {
+        val target = File(workDir(id), relativePath)
+        target.parentFile?.mkdirs()
+        val bitmap = context.contentResolver.openInputStream(uri)?.use(BitmapFactory::decodeStream)
+            ?: error(context.getString(R.string.error_read_icon))
+        FileOutputStream(target).use { output ->
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)
+        }
+        markDirty(id)
+    }
+
     fun addIconVariant(id: String, packageName: String, uri: Uri): String {
         val variants = loadIcons(id).filter { it.packageName == packageName }
         val usedKeys = variants.mapTo(mutableSetOf()) { it.variantKey }
@@ -230,6 +288,171 @@ class ProjectRepository(private val context: Context) {
         File(workDir(id), asset.archivePath).delete()
         markDirty(id)
         syncIconMapping(id)
+    }
+
+    fun previewIconsFromPack(
+        projectId: String,
+        uri: Uri,
+        onProgress: (ImportProgress) -> Unit = {},
+    ): IconImportPreview {
+        requireProject(projectId)
+        onProgress(ImportProgress(ImportPhase.Copying))
+        val displayName = ImportSourceDetector.resolveDisplayName(context, uri)
+        val sourceType = ImportSourceDetector.detect(context, uri, displayName)
+        val stagingId = UUID.randomUUID().toString()
+        val stagingRoot = iconImportStagingRoot(stagingId).also { it.mkdirs() }
+        return try {
+            val sourceFile = File(stagingRoot, displayName)
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                sourceFile.outputStream().use { output -> input.copyTo(output) }
+            } ?: error(context.getString(R.string.error_read_import))
+
+            val stagingWork = File(stagingRoot, "work")
+            val stagingExtract = File(stagingRoot, "extract")
+            val incomingMapping = when (sourceType) {
+                SourceType.Module -> {
+                    onProgress(ImportProgress(ImportPhase.Extracting))
+                    if (!ArchiveService.hasTopLevelIconsEntry(sourceFile)) {
+                        throw InvalidProjectArchiveException()
+                    }
+                    try {
+                        ArchiveService.importArchive(sourceFile, sourceType, stagingWork, stagingExtract)
+                    } catch (error: InvalidArchivePathException) {
+                        error(context.getString(R.string.error_invalid_zip_path, error.entryName))
+                    }
+                    IconMappingIndex()
+                }
+                SourceType.Mtz -> {
+                    onProgress(ImportProgress(ImportPhase.Extracting))
+                    try {
+                        ArchiveService.importArchive(sourceFile, sourceType, stagingWork, stagingExtract)
+                    } catch (error: InvalidArchivePathException) {
+                        error(context.getString(R.string.error_invalid_zip_path, error.entryName))
+                    }
+                    IconMappingIndex()
+                }
+                SourceType.Apk -> {
+                    if (!apkImporter.hasAppfilter(sourceFile)) {
+                        throw InvalidIconPackApkException()
+                    }
+                    val imported = apkImporter.import(
+                        apkFile = sourceFile,
+                        workDir = stagingWork,
+                        sourceExtractDir = stagingExtract,
+                        onProgress = onProgress,
+                    )
+                    imported.mapping
+                }
+                SourceType.Universal -> error(context.getString(R.string.error_read_import))
+            }
+            saveStagedMapping(stagingId, incomingMapping)
+
+            onProgress(ImportProgress(ImportPhase.Finishing))
+            val incomingIcons = ArchiveService.scanIconAssets(stagingWork)
+            val primaryByPackage = incomingIcons
+                .groupBy { it.packageName }
+                .mapValues { (_, assets) ->
+                    assets.minWith(
+                        compareBy<IconAsset> {
+                            val suffix = it.variantKey.removePrefix(it.packageName)
+                            if (suffix.isEmpty()) 0 else suffix.removePrefix("_").toIntOrNull() ?: Int.MAX_VALUE
+                        }.thenBy { it.variantKey },
+                    )
+                }
+            if (primaryByPackage.isEmpty()) {
+                throw InvalidProjectArchiveException()
+            }
+            val existingPackages = loadIcons(projectId).map { it.packageName }.toSet()
+            val pm = context.packageManager
+            val items = primaryByPackage.keys.sorted().map { packageName ->
+                val asset = primaryByPackage.getValue(packageName)
+                val installedName = runCatching {
+                    val info = pm.getApplicationInfo(packageName, 0)
+                    pm.getApplicationLabel(info).toString()
+                }.getOrNull()
+                IconImportCandidate(
+                    packageName = packageName,
+                    appName = installedName?.takeIf { it.isNotBlank() } ?: packageName,
+                    iconArchivePath = asset.archivePath,
+                    conflict = packageName in existingPackages,
+                    selected = true,
+                )
+            }
+            IconImportPreview(
+                stagingId = stagingId,
+                sourceType = sourceType,
+                displayName = displayName,
+                items = items,
+            )
+        } catch (error: Throwable) {
+            discardIconImportStaging(stagingId)
+            throw error
+        }
+    }
+
+    fun applyIconImport(
+        projectId: String,
+        preview: IconImportPreview,
+        mode: IconImportMode,
+        selectedPackages: Set<String>,
+        onProgress: (ImportProgress) -> Unit = {},
+    ) {
+        requireProject(projectId)
+        val stagingWork = File(iconImportStagingRoot(preview.stagingId), "work")
+        if (!stagingWork.isDirectory) {
+            error(context.getString(R.string.icon_import_staging_missing))
+        }
+        onProgress(ImportProgress(ImportPhase.Copying))
+        val targetWork = workDir(projectId)
+        val targetIconRoot = File(targetWork, "icons/res/drawable-xxhdpi").also { it.mkdirs() }
+        val incomingIcons = ArchiveService.scanIconAssets(stagingWork)
+        val incomingByPackage = incomingIcons.groupBy { it.packageName }
+        val existingByPackage = loadIcons(projectId).groupBy { it.packageName }
+        val packagesToApply = when (mode) {
+            IconImportMode.Overwrite -> selectedPackages.filter { it in incomingByPackage }
+            IconImportMode.AddOnly -> selectedPackages.filter {
+                it in incomingByPackage && it !in existingByPackage
+            }
+        }.sorted()
+        if (packagesToApply.isEmpty()) {
+            error(context.getString(R.string.icon_import_nothing_selected))
+        }
+        val total = packagesToApply.size
+        packagesToApply.forEachIndexed { index, packageName ->
+            onProgress(ImportProgress(ImportPhase.ParsingIcons, current = index + 1, total = total))
+            existingByPackage[packageName].orEmpty().forEach { asset ->
+                File(targetWork, asset.archivePath).delete()
+            }
+            incomingByPackage[packageName].orEmpty().forEach { asset ->
+                val source = File(stagingWork, asset.archivePath)
+                if (!source.isFile) return@forEach
+                val target = File(targetIconRoot, source.name)
+                source.copyTo(target, overwrite = true)
+            }
+        }
+
+        onProgress(ImportProgress(ImportPhase.Finishing))
+        val incomingMapping = loadStagedMapping(preview.stagingId)
+        val preferred = IconMappingBridge.preferIncomingMappings(
+            existing = loadIconMapping(projectId),
+            incoming = incomingMapping,
+            packages = packagesToApply.toSet(),
+        )
+        val synced = IconMappingBridge.mergeMappingsWithIcons(
+            existing = preferred,
+            icons = loadIcons(projectId),
+            pm = context.packageManager,
+        )
+        saveIconMapping(projectId, synced)
+        markDirty(projectId)
+        discardIconImportStaging(preview.stagingId)
+    }
+
+    fun iconImportCandidateFile(stagingId: String, iconArchivePath: String): File =
+        File(iconImportStagingRoot(stagingId), "work/$iconArchivePath")
+
+    fun discardIconImportStaging(stagingId: String) {
+        runCatching { iconImportStagingRoot(stagingId).deleteRecursively() }
     }
 
     fun exportProject(
@@ -411,6 +634,15 @@ class ProjectRepository(private val context: Context) {
     private fun metadataFile(id: String) = File(projectDir(id), "metadata.json")
     private fun preferencesFile(id: String) = File(projectDir(id), "preferences.json")
     private fun iconMappingFile(id: String) = File(projectDir(id), "icon_mapping.json")
+    private fun iconImportStagingRoot(stagingId: String) = File(context.cacheDir, "icon-import/$stagingId")
+    private fun stagedMappingFile(stagingId: String) = File(iconImportStagingRoot(stagingId), "mapping.json")
+
+    private fun saveStagedMapping(stagingId: String, mapping: IconMappingIndex) {
+        writeJson(stagedMappingFile(stagingId), mapping)
+    }
+
+    private fun loadStagedMapping(stagingId: String): IconMappingIndex =
+        readJson(stagedMappingFile(stagingId), IconMappingIndex())
 
     private inline fun <reified T> readJson(file: File, fallback: T): T {
         return runCatching {

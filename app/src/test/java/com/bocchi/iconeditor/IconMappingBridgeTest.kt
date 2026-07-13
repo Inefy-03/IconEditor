@@ -85,17 +85,39 @@ class IconMappingBridgeTest {
     }
 
     @Test
-    fun buildAppfilterXmlContainsMappings() {
-        val xml = IconMappingBridge.buildAppfilterXml(
-            listOf(
+    fun preferIncomingMappingsKeepsApkDrawableNames() {
+        val existing = com.bocchi.iconeditor.model.IconMappingIndex(
+            entries = listOf(
                 com.bocchi.iconeditor.model.IconMappingEntry(
                     packageName = "com.example.app",
-                    drawableName = "i9f3a2b1c",
-                    components = listOf("ComponentInfo{com.example.app/com.example.app.MainActivity}"),
+                    drawableName = "",
+                    components = listOf("ComponentInfo{com.example.app/com.example.app.Main}"),
+                ),
+                com.bocchi.iconeditor.model.IconMappingEntry(
+                    packageName = "com.keep.me",
+                    drawableName = "keep_drawable",
+                    components = listOf("ComponentInfo{com.keep.me/com.keep.me.Main}"),
                 ),
             ),
         )
-        assertTrue(xml.contains("drawable=\"i9f3a2b1c\""))
-        assertTrue(xml.contains("ComponentInfo{com.example.app/com.example.app.MainActivity}"))
+        val incoming = com.bocchi.iconeditor.model.IconMappingIndex(
+            entries = listOf(
+                com.bocchi.iconeditor.model.IconMappingEntry(
+                    packageName = "com.example.app",
+                    drawableName = "iabcdef12",
+                    components = listOf("ComponentInfo{com.example.app/com.example.app.Launcher}"),
+                ),
+            ),
+        )
+        val merged = IconMappingBridge.preferIncomingMappings(
+            existing = existing,
+            incoming = incoming,
+            packages = setOf("com.example.app"),
+        )
+        val app = merged.entries.first { it.packageName == "com.example.app" }
+        val keep = merged.entries.first { it.packageName == "com.keep.me" }
+        assertEquals("iabcdef12", app.drawableName)
+        assertEquals("ComponentInfo{com.example.app/com.example.app.Launcher}", app.components.single())
+        assertEquals("keep_drawable", keep.drawableName)
     }
 }
