@@ -24,6 +24,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.bocchi.iconeditor.R
+import com.bocchi.iconeditor.model.ApkInfo
 import com.bocchi.iconeditor.model.InfoTab
 import com.bocchi.iconeditor.model.ModuleInfo
 import com.bocchi.iconeditor.model.MtzInfo
@@ -41,6 +42,7 @@ fun InfoEditPage(
     contentPadding: PaddingValues = PaddingValues(),
     onSaveMtz: (MtzInfo) -> Unit,
     onSaveModule: (ModuleInfo) -> Unit,
+    onSaveApk: (ApkInfo) -> Unit,
 ) {
     val pagePadding = contentPadding.withPageMargins(horizontal = 16.dp)
     AnimatedContent(
@@ -62,6 +64,12 @@ fun InfoEditPage(
             InfoTab.Module -> ModuleInfoForm(
                 info = metadata.module,
                 onChange = onSaveModule,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = pagePadding,
+            )
+            InfoTab.Apk -> ApkInfoForm(
+                info = metadata.apk,
+                onChange = onSaveApk,
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = pagePadding,
             )
@@ -120,6 +128,33 @@ fun ModuleInfoForm(
                 value = info.installMessages.joinToString("\n"),
                 singleLine = false,
             ) { text -> onChange(info.copy(installMessages = text.lines())) }
+        }
+    }
+}
+
+@Composable
+fun ApkInfoForm(
+    info: ApkInfo,
+    onChange: (ApkInfo) -> Unit,
+    modifier: Modifier = Modifier,
+    contentPadding: PaddingValues = PaddingValues(),
+) {
+    LazyColumn(
+        modifier = modifier
+            .imePadding()
+            .overScrollVertical(),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+        contentPadding = contentPadding,
+        overscrollEffect = null,
+    ) {
+        item { LabeledField("package", info.packageName) { onChange(info.copy(packageName = it)) } }
+        item { LabeledField("label", info.label) { onChange(info.copy(label = it)) } }
+        item { LabeledField("author", info.author) { onChange(info.copy(author = it)) } }
+        item { LabeledField("versionName", info.versionName) { onChange(info.copy(versionName = it)) } }
+        item {
+            LabeledField("versionCode", info.versionCode.toString()) { text ->
+                onChange(info.copy(versionCode = text.toIntOrNull() ?: info.versionCode))
+            }
         }
     }
 }

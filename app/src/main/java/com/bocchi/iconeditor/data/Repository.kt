@@ -3,14 +3,20 @@ package com.bocchi.iconeditor.data
 import android.content.Context
 import android.net.Uri
 import com.bocchi.iconeditor.R
+import com.bocchi.iconeditor.model.ApkInfo
 import com.bocchi.iconeditor.model.AppSettings
 import com.bocchi.iconeditor.model.ExportFormat
+import com.bocchi.iconeditor.model.ExportProgress
+import com.bocchi.iconeditor.model.ExportPhase
 import com.bocchi.iconeditor.model.IconAsset
+import com.bocchi.iconeditor.model.IconMappingIndex
 import com.bocchi.iconeditor.model.IconPreferences
 import com.bocchi.iconeditor.model.ProjectIndex
 import com.bocchi.iconeditor.model.ProjectMetadata
 import com.bocchi.iconeditor.model.ProjectSummary
 import com.bocchi.iconeditor.model.SourceType
+import com.bocchi.iconeditor.model.ImportPhase
+import com.bocchi.iconeditor.model.ImportProgress
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
@@ -23,6 +29,8 @@ class ProjectRepository(private val context: Context) {
         ignoreUnknownKeys = true
         encodeDefaults = true
     }
+    private val apkImporter = ApkIconPackImporter(context)
+    private val apkExporter = ApkIconPackExporter(context)
 
     private val root: File = File(context.filesDir, "projects")
     private val indexFile: File = File(root, "index.json")
@@ -57,30 +65,63 @@ class ProjectRepository(private val context: Context) {
         return project
     }
 
-    fun importProject(uri: Uri, displayName: String): ProjectSummary {
-        val extension = displayName.substringAfterLast('.', "").lowercase()
-        val sourceType = when (extension) {
-            "mtz" -> SourceType.Mtz
-            "zip" -> SourceType.Module
-            else -> throw InvalidProjectArchiveException()
-        }
-        val project = createProject(displayName.substringBeforeLast('.').ifBlank { context.getString(R.string.imported_project) })
-            .copy(sourceType = sourceType, sourceFileName = displayName)
+    fun importProject(
+        uri: Uri,
+        displayName: String,
+        onProgress: (ImportProgress) -> Unit = {},
+    ): ProjectSummary {
+        val resolvedName = ImportSourceDetector.resolveDisplayName(context, uri)
+        val sourceType = ImportSourceDetector.detect(context, uri, resolvedName)
+        val project = createProject(resolvedName.substringBeforeLast('.').ifBlank { context.getString(R.string.imported_project) })
+            .copy(sourceType = sourceType, sourceFileName = resolvedName)
         return try {
-            val target = File(sourceDir(project.id), displayName)
+            onProgress(ImportProgress(ImportPhase.Copying))
+            val target = File(sourceDir(project.id), resolvedName)
             context.contentResolver.openInputStream(uri)?.use { input ->
                 target.outputStream().use { output -> input.copyTo(output) }
             } ?: error(context.getString(R.string.error_read_import))
-            if (sourceType == SourceType.Module && !ArchiveService.hasTopLevelIconsEntry(target)) {
-                throw InvalidProjectArchiveException()
+            when (sourceType) {
+                SourceType.Module -> {
+                    onProgress(ImportProgress(ImportPhase.Extracting))
+                    if (!ArchiveService.hasTopLevelIconsEntry(target)) {
+                        throw InvalidProjectArchiveException()
+                    }
+                    val imported = try {
+                        ArchiveService.importArchive(target, sourceType, workDir(project.id), sourceExtractDir(project.id))
+                    } catch (error: InvalidArchivePathException) {
+                        error(context.getString(R.string.error_invalid_zip_path, error.entryName))
+                    }
+                    saveMetadata(project.id, imported.metadata)
+                    onProgress(ImportProgress(ImportPhase.Finishing))
+                    syncIconMapping(project.id)
+                }
+                SourceType.Mtz -> {
+                    onProgress(ImportProgress(ImportPhase.Extracting))
+                    val imported = try {
+                        ArchiveService.importArchive(target, sourceType, workDir(project.id), sourceExtractDir(project.id))
+                    } catch (error: InvalidArchivePathException) {
+                        error(context.getString(R.string.error_invalid_zip_path, error.entryName))
+                    }
+                    saveMetadata(project.id, imported.metadata)
+                    onProgress(ImportProgress(ImportPhase.Finishing))
+                    syncIconMapping(project.id)
+                }
+                SourceType.Apk -> {
+                    if (!apkImporter.hasAppfilter(target)) {
+                        throw InvalidIconPackApkException()
+                    }
+                    val imported = apkImporter.import(
+                        apkFile = target,
+                        workDir = workDir(project.id),
+                        sourceExtractDir = sourceExtractDir(project.id),
+                        onProgress = onProgress,
+                    )
+                    saveMetadata(project.id, imported.metadata)
+                    saveIconMapping(project.id, imported.mapping)
+                    onProgress(ImportProgress(ImportPhase.Finishing))
+                }
+                SourceType.Universal -> Unit
             }
-
-            val imported = try {
-                ArchiveService.importArchive(target, sourceType, workDir(project.id), sourceExtractDir(project.id))
-            } catch (error: InvalidArchivePathException) {
-                error(context.getString(R.string.error_invalid_zip_path, error.entryName))
-            }
-            saveMetadata(project.id, imported.metadata)
             saveIconPreferences(project.id, IconPreferences())
             updateProject(project.copy(updatedAt = System.currentTimeMillis()))
             project
@@ -113,6 +154,23 @@ class ProjectRepository(private val context: Context) {
 
     fun saveIconPreferences(id: String, preferences: IconPreferences) {
         writeJson(preferencesFile(id), preferences)
+    }
+
+    fun loadIconMapping(id: String): IconMappingIndex = readJson(iconMappingFile(id), IconMappingIndex())
+
+    fun saveIconMapping(id: String, mapping: IconMappingIndex) {
+        writeJson(iconMappingFile(id), mapping)
+    }
+
+    fun syncIconMapping(id: String) {
+        val icons = loadIcons(id)
+        val existing = loadIconMapping(id)
+        val mapping = if (existing.entries.isEmpty()) {
+            IconMappingBridge.buildDefaultMappings(context, icons)
+        } else {
+            IconMappingBridge.mergeMappingsWithIcons(existing, icons, context.packageManager)
+        }
+        saveIconMapping(id, mapping)
     }
 
     fun loadIcons(id: String): List<IconAsset> = ArchiveService.scanIconAssets(workDir(id))
@@ -148,6 +206,7 @@ class ProjectRepository(private val context: Context) {
             target.outputStream().use { output -> input.copyTo(output) }
         } ?: error(context.getString(R.string.error_read_icon))
         markDirty(id)
+        syncIconMapping(id)
         return variantKey
     }
 
@@ -170,26 +229,87 @@ class ProjectRepository(private val context: Context) {
     fun deleteIcon(id: String, asset: IconAsset) {
         File(workDir(id), asset.archivePath).delete()
         markDirty(id)
+        syncIconMapping(id)
     }
 
-    fun exportProject(id: String, format: ExportFormat, target: Uri) {
+    fun exportProject(
+        id: String,
+        format: ExportFormat,
+        target: Uri,
+        onProgress: (ExportProgress) -> Unit = {},
+    ) {
+        val reporter = ExportProgressReporter(onProgress)
         val project = requireProject(id)
-        val metadata = loadMetadata(id)
+        val formatLabel = when (format) {
+            ExportFormat.Mtz -> "MTZ"
+            ExportFormat.ModuleZip -> "Module"
+            ExportFormat.Apk -> "APK"
+        }
+        reporter.update(
+            phase = ExportPhase.Preparing,
+            log = "开始导出 $formatLabel：${project.name}",
+        )
+        val metadata = resolveExportMetadata(id, format, persist = true)
+        reporter.log("校验导出信息")
         validateForExport(format, metadata).takeIf { it.isNotEmpty() }?.let {
             error(it.joinToString("\n"))
         }
-        context.contentResolver.openOutputStream(target)?.use { output ->
-            ArchiveService.exportArchive(
-                metadata = metadata,
-                workDir = workDir(id),
-                format = format,
-                templateFiles = loadArchiveTemplate(format),
-                iconsTemplate = loadIconsTemplate(),
-                sourceArchive = sameFormatSourceArchive(project, format),
-                output = output,
-            )
-        } ?: error(context.getString(R.string.error_create_export))
+        val icons = loadIcons(id)
+        reporter.log("已加载 ${icons.size} 个图标资源")
+        val apkMapping = if (format == ExportFormat.Apk) {
+            reporter.update(detail = "生成 APK 映射")
+            reporter.log("生成 APK 图标映射")
+            IconMappingBridge.prepareApkExportMapping(context, icons, loadIconMapping(id)).also {
+                saveIconMapping(id, it)
+                reporter.log("映射条目：${it.entries.size}")
+            }
+        } else {
+            syncIconMapping(id)
+            IconMappingIndex()
+        }
+        reporter.update(phase = ExportPhase.WritingArchive, detail = "写入目标文件")
+        reporter.log("打开导出目标")
+        try {
+            context.contentResolver.openOutputStream(target, "w")?.use { output ->
+                when (format) {
+                    ExportFormat.Mtz, ExportFormat.ModuleZip -> {
+                        reporter.log("打包 $formatLabel 归档")
+                        ArchiveService.exportArchive(
+                            metadata = metadata,
+                            workDir = workDir(id),
+                            format = format,
+                            templateFiles = loadArchiveTemplate(format),
+                            iconsTemplate = loadIconsTemplate(),
+                            sourceArchive = sameFormatSourceArchive(project, format),
+                            output = output,
+                            reporter = reporter,
+                        )
+                    }
+                    ExportFormat.Apk -> apkExporter.export(
+                        apkInfo = metadata.apk,
+                        workDir = workDir(id),
+                        mapping = apkMapping,
+                        icons = icons,
+                        sourceApk = sameFormatSourceArchive(project, format),
+                        output = output,
+                        reporter = reporter,
+                    )
+                }
+                reporter.log("写入完成")
+            } ?: error(context.getString(R.string.error_create_export))
+            ExportDirectoryHelper.finalizeExportIfNeeded(context, target)
+        } catch (error: Exception) {
+            ExportDirectoryHelper.abortPendingExport(context, target)
+            throw error
+        }
+        reporter.update(phase = ExportPhase.Finishing, detail = "")
+        reporter.log("导出完成")
         updateProject(project.copy(dirty = false))
+    }
+
+    fun validateForExport(id: String, format: ExportFormat): List<String> {
+        val metadata = resolveExportMetadata(id, format, persist = false)
+        return validateForExport(format, metadata)
     }
 
     fun validateForExport(format: ExportFormat, metadata: ProjectMetadata): List<String> {
@@ -211,10 +331,35 @@ class ProjectRepository(private val context: Context) {
                     add(context.getString(R.string.validation_module_id_format))
                 }
             }
+            ExportFormat.Apk -> buildList {
+                if (metadata.apk.packageName.isBlank()) {
+                    add(context.getString(R.string.validation_apk_package))
+                } else if (!ApkInfoDefaults.isValidPackageName(metadata.apk.packageName)) {
+                    add(context.getString(R.string.validation_apk_package_format))
+                }
+                if (metadata.apk.label.isBlank()) {
+                    add(context.getString(R.string.validation_apk_label))
+                }
+                if (metadata.apk.versionName.isBlank()) {
+                    add(context.getString(R.string.validation_apk_version))
+                }
+            }
         }
     }
 
+    private fun resolveExportMetadata(id: String, format: ExportFormat, persist: Boolean): ProjectMetadata {
+        val metadata = loadMetadata(id)
+        if (format != ExportFormat.Apk) return metadata
+        val project = requireProject(id)
+        val resolvedApk = ApkInfoDefaults.resolve(project.name, metadata)
+        if (resolvedApk == metadata.apk) return metadata
+        val updated = metadata.copy(apk = resolvedApk)
+        if (persist) saveMetadata(id, updated)
+        return updated
+    }
+
     private fun loadArchiveTemplate(format: ExportFormat): Map<String, ByteArray> {
+        if (format == ExportFormat.Apk) return emptyMap()
         if (format == ExportFormat.Mtz) return mapOf("com.miui.home" to "test".encodeToByteArray())
         return ModuleTemplateFiles.associateWith { name ->
             context.assets.open("archive_templates/module/$name").use { it.readBytes() }
@@ -230,6 +375,7 @@ class ProjectRepository(private val context: Context) {
         val sameFormat = when (format) {
             ExportFormat.Mtz -> project.sourceType == SourceType.Mtz
             ExportFormat.ModuleZip -> project.sourceType == SourceType.Module
+            ExportFormat.Apk -> project.sourceType == SourceType.Apk
         }
         if (!sameFormat || project.sourceFileName.isBlank()) return null
         return File(sourceDir(project.id), project.sourceFileName).takeIf(File::isFile)
@@ -264,6 +410,7 @@ class ProjectRepository(private val context: Context) {
     private fun workDir(id: String) = File(projectDir(id), "work")
     private fun metadataFile(id: String) = File(projectDir(id), "metadata.json")
     private fun preferencesFile(id: String) = File(projectDir(id), "preferences.json")
+    private fun iconMappingFile(id: String) = File(projectDir(id), "icon_mapping.json")
 
     private inline fun <reified T> readJson(file: File, fallback: T): T {
         return runCatching {

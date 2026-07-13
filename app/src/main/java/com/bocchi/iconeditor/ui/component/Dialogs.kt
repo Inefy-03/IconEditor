@@ -55,7 +55,8 @@ fun ConfirmDeleteDialog(project: ProjectSummary?, metadata: ProjectMetadata?, on
         when (project.sourceType) {
             SourceType.Mtz -> metadata.mtz.title
             SourceType.Module -> metadata.module.name
-            SourceType.Universal -> metadata.mtz.title.ifBlank { metadata.module.name }
+            SourceType.Apk -> metadata.apk.label
+            SourceType.Universal -> metadata.mtz.title.ifBlank { metadata.module.name.ifBlank { metadata.apk.label } }
         }.ifBlank { project.name }
     } else {
         project?.name.orEmpty()
@@ -103,6 +104,14 @@ fun ExportDialog(
                     onValidationFailed(p, ExportFormat.ModuleZip)
                 }
             }, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.export_module_zip)) }
+            Button(onClick = {
+                val p = project ?: return@Button
+                val errors = validate(p.id, ExportFormat.Apk)
+                if (errors.isEmpty()) onExport(p, ExportFormat.Apk) else {
+                    onDismiss()
+                    onValidationFailed(p, ExportFormat.Apk)
+                }
+            }, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.export_apk)) }
             Button(modifier = Modifier.fillMaxWidth(), onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
         }
     }
@@ -120,6 +129,7 @@ fun ExportValidationDialog(
         summary = when (format) {
             ExportFormat.Mtz -> stringResource(R.string.export_mtz_incomplete)
             ExportFormat.ModuleZip -> stringResource(R.string.export_module_incomplete)
+            ExportFormat.Apk -> stringResource(R.string.export_apk_incomplete)
             null -> null
         },
         onDismissRequest = onDismiss,
@@ -157,6 +167,7 @@ fun SourceType.label(): String = when (this) {
     SourceType.Universal -> stringResource(R.string.source_universal)
     SourceType.Mtz -> stringResource(R.string.source_theme)
     SourceType.Module -> stringResource(R.string.source_module)
+    SourceType.Apk -> stringResource(R.string.source_apk)
 }
 
 fun Context.displayName(uri: Uri): String {

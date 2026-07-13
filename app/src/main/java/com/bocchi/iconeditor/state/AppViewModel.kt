@@ -10,14 +10,19 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.bocchi.iconeditor.R
+import com.bocchi.iconeditor.data.InvalidIconPackApkException
 import com.bocchi.iconeditor.data.InvalidProjectArchiveException
 import com.bocchi.iconeditor.data.ProjectRepository
 import com.bocchi.iconeditor.data.packagename.PackageNameRepository
+import com.bocchi.iconeditor.model.ApkInfo
 import com.bocchi.iconeditor.model.AppSettings
 import com.bocchi.iconeditor.model.ExportFormat
+import com.bocchi.iconeditor.model.ExportPhase
+import com.bocchi.iconeditor.model.ExportProgress
 import com.bocchi.iconeditor.model.IconAsset
 import com.bocchi.iconeditor.model.IconListItem
 import com.bocchi.iconeditor.model.IconPreferences
+import com.bocchi.iconeditor.model.ImportProgress
 import com.bocchi.iconeditor.model.LocalAppInfo
 import com.bocchi.iconeditor.model.ModuleInfo
 import com.bocchi.iconeditor.model.MtzInfo
@@ -25,6 +30,7 @@ import com.bocchi.iconeditor.model.ProjectMetadata
 import com.bocchi.iconeditor.model.ProjectSummary
 import com.bocchi.iconeditor.model.SortField
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -58,6 +64,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     var message by mutableStateOf<AppMessage?>(null)
         private set
     var isProjectLoading by mutableStateOf(false)
+        private set
+    var isImporting by mutableStateOf(false)
+        private set
+    var importProgress by mutableStateOf<ImportProgress?>(null)
+        private set
+    var isExporting by mutableStateOf(false)
+        private set
+    var exportProgress by mutableStateOf<ExportProgress?>(null)
         private set
     var projectsScrollToTopRequest by mutableIntStateOf(0)
         private set
@@ -119,21 +133,35 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun importProject(uri: Uri, displayName: String) {
         viewModelScope.launch {
             initializationJob.join()
+            isImporting = true
+            importProgress = ImportProgress(com.bocchi.iconeditor.model.ImportPhase.Copying)
+            val progressChannel = Channel<ImportProgress>(Channel.CONFLATED)
+            val progressCollector = launch(Dispatchers.Main.immediate) {
+                for (progress in progressChannel) {
+                    importProgress = progress
+                }
+            }
             runCatching {
                 val project = withContext(Dispatchers.IO) {
-                    repository.importProject(uri, displayName)
+                    repository.importProject(uri, displayName) { progress ->
+                        progressChannel.trySend(progress)
+                    }
                 }
                 refresh()
                 loadProject(project.id, loadIcons = false)
                 projectsScrollToTopRequest++
             }.onFailure { error ->
                 if (error is CancellationException) throw error
-                if (error is InvalidProjectArchiveException) {
+                if (error is InvalidProjectArchiveException || error is InvalidIconPackApkException) {
                     showMessage(R.string.import_failed_title, getApplication<Application>().getString(R.string.import_invalid_file))
                 } else {
                     showError(error)
                 }
             }
+            progressChannel.close()
+            progressCollector.join()
+            isImporting = false
+            importProgress = null
         }
     }
 
@@ -205,6 +233,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun saveApkInfo(info: ApkInfo) = runAction {
+        selectedProjectId?.let {
+            metadata = metadata.copy(apk = info)
+            repository.saveMetadata(it, metadata)
+            refresh()
+        }
+    }
+
     fun updateIconPreferences(preferences: IconPreferences) = runAction {
         val enabledInstalledAppSource =
             (!iconPreferences.showLocalApps && preferences.showLocalApps) ||
@@ -250,6 +286,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
             repository.saveIconPreferences(projectId, iconPreferences)
             icons = repository.loadIcons(projectId)
+            repository.syncIconMapping(projectId)
             refresh()
         }
     }
@@ -274,14 +311,62 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun exportProject(id: String, format: ExportFormat, target: Uri) = runAction {
-        repository.exportProject(id, format, target)
-        refresh()
-        showMessage(R.string.dialog_notice, getApplication<Application>().getString(R.string.export_complete))
+    fun dismissExportProgress() {
+        exportProgress = null
+    }
+
+    fun exportProject(id: String, format: ExportFormat, target: Uri, locationLabel: String = "") {
+        viewModelScope.launch {
+            isExporting = true
+            exportProgress = ExportProgress(com.bocchi.iconeditor.model.ExportPhase.Preparing)
+            val progressChannel = Channel<ExportProgress>(capacity = Channel.UNLIMITED)
+            var lastProgress: ExportProgress? = null
+            val progressCollector = launch(Dispatchers.Main.immediate) {
+                for (progress in progressChannel) {
+                    lastProgress = progress
+                    exportProgress = progress
+                }
+            }
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    repository.exportProject(id, format, target) { progress ->
+                        progressChannel.trySend(progress)
+                    }
+                }
+                refresh()
+                val message = if (locationLabel.isNotBlank()) {
+                    getApplication<Application>().getString(R.string.export_complete_path, locationLabel)
+                } else {
+                    getApplication<Application>().getString(R.string.export_complete)
+                }
+                exportProgress = (lastProgress ?: ExportProgress(ExportPhase.Finishing)).copy(
+                    phase = ExportPhase.Finishing,
+                    finished = true,
+                    success = true,
+                    detail = message,
+                    logs = (lastProgress?.logs ?: emptyList()) + message,
+                )
+            }.onFailure { error ->
+                if (error is CancellationException) throw error
+                val summary = error.message?.takeIf { it.isNotBlank() }
+                    ?: getApplication<Application>().getString(R.string.export_failed_generic)
+                exportProgress = (lastProgress ?: ExportProgress(ExportPhase.Finishing)).copy(
+                    phase = ExportPhase.Finishing,
+                    finished = true,
+                    success = false,
+                    detail = summary,
+                    logs = (lastProgress?.logs ?: emptyList()) + summary,
+                )
+                showError(error)
+            }
+            progressChannel.close()
+            progressCollector.join()
+            isExporting = false
+        }
     }
 
     fun validateForExport(id: String, format: ExportFormat): List<String> {
-        return repository.validateForExport(format, repository.loadMetadata(id))
+        return repository.validateForExport(id, format)
     }
 
     fun exportSuggestedName(project: ProjectSummary, format: ExportFormat): String {
@@ -289,6 +374,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         return when (format) {
             ExportFormat.Mtz -> projectInfo?.mtz?.title
             ExportFormat.ModuleZip -> projectInfo?.module?.name
+            ExportFormat.Apk -> projectInfo?.apk?.label
         }.orEmpty().trim().ifBlank { project.name }
     }
 

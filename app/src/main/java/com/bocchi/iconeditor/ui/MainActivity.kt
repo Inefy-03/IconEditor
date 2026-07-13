@@ -5,14 +5,17 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
+import android.provider.DocumentsContract
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.calculateEndPadding
@@ -30,6 +33,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -60,7 +64,8 @@ import com.bocchi.iconeditor.ui.component.MessageDialog
 import com.bocchi.iconeditor.ui.component.RootPagerContent
 import com.bocchi.iconeditor.ui.component.Screen
 import com.bocchi.iconeditor.ui.component.appPageBackground
-import com.bocchi.iconeditor.ui.component.displayName
+import com.bocchi.iconeditor.data.ExportDirectoryHelper
+import com.bocchi.iconeditor.data.ImportSourceDetector
 import com.bocchi.iconeditor.ui.component.rememberMiuixBlurBackdrop
 import com.bocchi.iconeditor.ui.component.rootScreenIndex
 import com.bocchi.iconeditor.ui.component.withPageMargins
@@ -73,7 +78,10 @@ import com.bocchi.iconeditor.ui.page.ProjectsPage
 import com.bocchi.iconeditor.ui.page.SettingsPage
 import com.bocchi.iconeditor.ui.page.ThemeSettingsPage
 import kotlinx.coroutines.launch
+import com.bocchi.iconeditor.ui.component.displayName
 import top.yukonga.miuix.kmp.basic.FabPosition
+import com.bocchi.iconeditor.ui.component.ExportProgressOverlay
+import com.bocchi.iconeditor.ui.component.ImportProgressOverlay
 import top.yukonga.miuix.kmp.basic.FloatingActionButton
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
@@ -92,6 +100,7 @@ internal val ProjectImportMimeTypes = listOf(
     "application/zip",
     "application/x-zip-compressed",
     "application/x-miui-theme",
+    "application/vnd.android.package-archive",
 )
 internal const val ProjectImportPrimaryMimeType = "application/zip"
 private const val InstalledAppsPermission = "com.android.permission.GET_INSTALLED_APPS"
@@ -99,7 +108,20 @@ private const val MiuiSecurityPackage = "com.lbe.security.miui"
 
 private class OpenProjectDocument : ActivityResultContracts.OpenDocument() {
     override fun createIntent(context: Context, input: Array<String>): Intent =
-        super.createIntent(context, input).setType(ProjectImportPrimaryMimeType)
+        super.createIntent(context, input).apply {
+            type = "*/*"
+            putExtra(Intent.EXTRA_MIME_TYPES, input)
+        }
+}
+
+private class CreateExportDocument(
+    private val mimeType: String,
+    private val initialDirectory: Uri?,
+) : ActivityResultContracts.CreateDocument(mimeType) {
+    override fun createIntent(context: Context, input: String): Intent =
+        super.createIntent(context, input).apply {
+            initialDirectory?.let { putExtra(DocumentsContract.EXTRA_INITIAL_URI, it) }
+        }
 }
 
 class MainActivity : ComponentActivity() {
@@ -177,20 +199,44 @@ private fun IconEditorApp(
         }
     }
     val importLauncher = rememberLauncherForActivityResult(OpenProjectDocument()) { uri ->
-        uri?.let { viewModel.importProject(it, context.displayName(it)) }
+        uri?.let {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    it,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
+            }
+            viewModel.importProject(it, ImportSourceDetector.resolveDisplayName(context, it))
+        }
     }
     val mtzExportLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("application/octet-stream"),
+        CreateExportDocument(
+            mimeType = "application/octet-stream",
+            initialDirectory = ExportDirectoryHelper.initialDocumentUri(viewModel.settings),
+        ),
     ) { uri ->
         val project = exportProject
         if (uri != null && project != null) viewModel.exportProject(project.id, ExportFormat.Mtz, uri)
         exportProject = null
     }
     val zipExportLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("application/zip"),
+        CreateExportDocument(
+            mimeType = "application/zip",
+            initialDirectory = ExportDirectoryHelper.initialDocumentUri(viewModel.settings),
+        ),
     ) { uri ->
         val project = exportProject
         if (uri != null && project != null) viewModel.exportProject(project.id, ExportFormat.ModuleZip, uri)
+        exportProject = null
+    }
+    val apkExportLauncher = rememberLauncherForActivityResult(
+        CreateExportDocument(
+            mimeType = "application/vnd.android.package-archive",
+            initialDirectory = ExportDirectoryHelper.initialDocumentUri(viewModel.settings),
+        ),
+    ) { uri ->
+        val project = exportProject
+        if (uri != null && project != null) viewModel.exportProject(project.id, ExportFormat.Apk, uri)
         exportProject = null
     }
     val scrollBehavior = MiuixScrollBehavior()
@@ -221,7 +267,7 @@ private fun IconEditorApp(
     LaunchedEffect(incomingProjectUri) {
         incomingProjectUri?.let { uri ->
             selectRoot(Screen.Projects)
-            viewModel.importProject(uri, context.displayName(uri))
+            viewModel.importProject(uri, ImportSourceDetector.resolveDisplayName(context, uri))
             onIncomingProjectHandled()
         }
     }
@@ -280,7 +326,9 @@ private fun IconEditorApp(
                                     },
                                     settingsPage = { contentPadding ->
                                         SettingsPage(
+                                            settings = viewModel.settings,
                                             contentPadding = contentPadding.withPageMargins(horizontal = 0.dp),
+                                            onSettings = viewModel::updateSettings,
                                             onTheme = { navigateTo(Screen.ThemeSettings) },
                                             onAbout = { navigateTo(Screen.About) },
                                         )
@@ -304,6 +352,7 @@ private fun IconEditorApp(
                                         contentPadding = contentPadding,
                                         onSaveMtz = viewModel::saveMtzInfo,
                                         onSaveModule = viewModel::saveModuleInfo,
+                                        onSaveApk = viewModel::saveApkInfo,
                                     )
                                 }
                                 Screen.Icons -> SecondaryScene(
@@ -370,12 +419,38 @@ private fun IconEditorApp(
                     validate = viewModel::validateForExport,
                     onDismiss = { exportProject = null },
                     onExport = { project, format ->
-                        val extension = if (format == ExportFormat.Mtz) "mtz" else "zip"
+                        val extension = when (format) {
+                            ExportFormat.Mtz -> "mtz"
+                            ExportFormat.ModuleZip -> "zip"
+                            ExportFormat.Apk -> "apk"
+                        }
                         val suggestedName = viewModel.exportSuggestedName(project, format)
-                        exportProject = project
-                        when (format) {
-                            ExportFormat.Mtz -> mtzExportLauncher.launch("$suggestedName.$extension")
-                            ExportFormat.ModuleZip -> zipExportLauncher.launch("$suggestedName.$extension")
+                        val fileName = "$suggestedName.$extension"
+                        val mimeType = when (format) {
+                            ExportFormat.Mtz -> "application/octet-stream"
+                            ExportFormat.ModuleZip -> "application/zip"
+                            ExportFormat.Apk -> "application/vnd.android.package-archive"
+                        }
+                        val target = ExportDirectoryHelper.createExportTarget(
+                            context = context,
+                            settings = viewModel.settings,
+                            mimeType = mimeType,
+                            displayName = fileName,
+                        )
+                        if (target != null) {
+                            viewModel.exportProject(
+                                id = project.id,
+                                format = format,
+                                target = target.uri,
+                                locationLabel = target.locationLabel,
+                            )
+                        } else {
+                            exportProject = project
+                            when (format) {
+                                ExportFormat.Mtz -> mtzExportLauncher.launch(fileName)
+                                ExportFormat.ModuleZip -> zipExportLauncher.launch(fileName)
+                                ExportFormat.Apk -> apkExportLauncher.launch(fileName)
+                            }
                         }
                     },
                     onValidationFailed = { project, format ->
@@ -389,7 +464,11 @@ private fun IconEditorApp(
                     onComplete = {
                         val (project, format) = incompleteExport ?: return@ExportValidationDialog
                         incompleteExport = null
-                        infoTab = if (format == ExportFormat.Mtz) InfoTab.Mtz else InfoTab.Module
+                        infoTab = when (format) {
+                            ExportFormat.Mtz -> InfoTab.Mtz
+                            ExportFormat.ModuleZip -> InfoTab.Module
+                            ExportFormat.Apk -> InfoTab.Apk
+                        }
                         viewModel.loadProject(project.id, loadIcons = false)
                         navigateTo(Screen.Info)
                     },
@@ -398,6 +477,11 @@ private fun IconEditorApp(
                     title = viewModel.message?.title,
                     message = viewModel.message?.summary,
                     onDismiss = viewModel::clearMessage,
+                )
+                ImportProgressOverlay(progress = viewModel.importProgress)
+                ExportProgressOverlay(
+                    progress = viewModel.exportProgress,
+                    onDismiss = viewModel::dismissExportProgress,
                 )
             }
         }

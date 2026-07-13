@@ -399,7 +399,8 @@ private fun InfoTabRow(
 ) {
     val mtzTitle = stringResource(R.string.tab_mtz_info)
     val moduleTitle = stringResource(R.string.tab_module_info)
-    val tabs = remember(mtzTitle, moduleTitle) { listOf(mtzTitle, moduleTitle) }
+    val apkTitle = stringResource(R.string.tab_apk_info)
+    val tabs = remember(mtzTitle, moduleTitle, apkTitle) { listOf(mtzTitle, moduleTitle, apkTitle) }
     TabRow(
         tabs = tabs,
         selectedTabIndex = selectedTab.ordinal,

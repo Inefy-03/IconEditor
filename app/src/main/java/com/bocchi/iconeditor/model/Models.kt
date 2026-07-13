@@ -11,7 +11,7 @@ import kotlinx.serialization.encoding.Encoder
 import kotlinx.serialization.json.JsonNames
 
 @Serializable(with = SourceTypeSerializer::class)
-enum class SourceType { Universal, Mtz, Module }
+enum class SourceType { Universal, Mtz, Module, Apk }
 
 object SourceTypeSerializer : KSerializer<SourceType> {
     override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor("SourceType", PrimitiveKind.STRING)
@@ -25,7 +25,7 @@ object SourceTypeSerializer : KSerializer<SourceType> {
 }
 
 @Serializable
-enum class ExportFormat { Mtz, ModuleZip }
+enum class ExportFormat { Mtz, ModuleZip, Apk }
 
 @Serializable
 enum class ThemeMode { System, Light, Dark }
@@ -36,7 +36,52 @@ enum class SortField { AppName, PackageName }
 @Serializable
 enum class ProjectSortField { CreatedAt, UpdatedAt, Name }
 
-enum class InfoTab { Mtz, Module }
+enum class InfoTab { Mtz, Module, Apk }
+
+enum class ImportPhase { Copying, Extracting, ParsingIcons, Finishing }
+
+enum class ExportPhase { Preparing, PackagingIcons, WritingArchive, Signing, Finishing }
+
+data class ImportProgress(
+    val phase: ImportPhase,
+    val current: Int = 0,
+    val total: Int = 0,
+) {
+    val fraction: Float
+        get() = when (phase) {
+            ImportPhase.Copying -> 0.05f
+            ImportPhase.Extracting -> 0.15f
+            ImportPhase.ParsingIcons -> {
+                if (total <= 0) 0.2f
+                else 0.15f + 0.8f * (current.toFloat() / total.toFloat())
+            }
+            ImportPhase.Finishing -> 0.98f
+        }
+}
+
+data class ExportProgress(
+    val phase: ExportPhase,
+    val current: Int = 0,
+    val total: Int = 0,
+    val detail: String = "",
+    val logs: List<String> = emptyList(),
+    val finished: Boolean = false,
+    val success: Boolean = false,
+) {
+    val fraction: Float
+        get() = when {
+            finished -> 1f
+            phase == ExportPhase.Preparing -> 0.08f
+            phase == ExportPhase.PackagingIcons -> {
+                if (total <= 0) 0.25f
+                else 0.08f + 0.62f * (current.toFloat() / total.toFloat())
+            }
+            phase == ExportPhase.WritingArchive -> 0.78f
+            phase == ExportPhase.Signing -> 0.9f
+            phase == ExportPhase.Finishing -> 0.98f
+            else -> 0f
+        }
+}
 
 @Serializable
 data class ProjectSummary(
@@ -72,11 +117,34 @@ data class ModuleInfo(
 )
 
 @Serializable
+data class ApkInfo(
+    val packageName: String = "",
+    val versionName: String = "1.0",
+    val versionCode: Int = 1,
+    val label: String = "",
+    val author: String = "",
+)
+
+@Serializable
 data class ProjectMetadata(
     val mtz: MtzInfo = MtzInfo(),
     @OptIn(ExperimentalSerializationApi::class)
     @JsonNames("magisk")
     val module: ModuleInfo = ModuleInfo(),
+    val apk: ApkInfo = ApkInfo(),
+)
+
+@Serializable
+data class IconMappingEntry(
+    val packageName: String,
+    val drawableName: String,
+    val components: List<String> = emptyList(),
+    val resourceZipPath: String? = null,
+)
+
+@Serializable
+data class IconMappingIndex(
+    val entries: List<IconMappingEntry> = emptyList(),
 )
 
 @Serializable
@@ -99,6 +167,7 @@ data class AppSettings(
     val blurEnabled: Boolean = true,
     val predictiveBackEnabled: Boolean = false,
     val projectSortField: ProjectSortField = ProjectSortField.CreatedAt,
+    val exportDirectoryUri: String = "",
 )
 
 @Serializable

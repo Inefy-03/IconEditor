@@ -266,7 +266,8 @@ fun projectDisplayTitle(project: ProjectSummary, metadata: ProjectMetadata): Str
     return when (project.sourceType) {
         SourceType.Mtz -> metadata.mtz.title
         SourceType.Module -> metadata.module.name
-        SourceType.Universal -> metadata.mtz.title.ifBlank { metadata.module.name }
+        SourceType.Apk -> metadata.apk.label
+        SourceType.Universal -> metadata.mtz.title.ifBlank { metadata.module.name.ifBlank { metadata.apk.label } }
     }.ifBlank { project.name }
 }
 
@@ -274,7 +275,8 @@ fun projectDisplayVersion(project: ProjectSummary, metadata: ProjectMetadata): S
     return when (project.sourceType) {
         SourceType.Mtz -> metadata.mtz.version
         SourceType.Module -> metadata.module.version
-        SourceType.Universal -> metadata.mtz.version.ifBlank { metadata.module.version }
+        SourceType.Apk -> metadata.apk.versionName
+        SourceType.Universal -> metadata.mtz.version.ifBlank { metadata.module.version.ifBlank { metadata.apk.versionName } }
     }
 }
 
@@ -282,7 +284,8 @@ fun projectDisplayAuthor(project: ProjectSummary, metadata: ProjectMetadata): St
     return when (project.sourceType) {
         SourceType.Mtz -> metadata.mtz.author
         SourceType.Module -> metadata.module.author
-        SourceType.Universal -> metadata.mtz.author.ifBlank { metadata.module.author }
+        SourceType.Apk -> metadata.apk.author
+        SourceType.Universal -> metadata.mtz.author.ifBlank { metadata.module.author.ifBlank { metadata.apk.author } }
     }
 }
 

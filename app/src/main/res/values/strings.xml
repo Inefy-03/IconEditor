@@ -28,18 +28,23 @@
     <string name="export_format_title">选择导出格式</string>
     <string name="export_mtz">导出.mtz</string>
     <string name="export_module_zip">导出模块.zip</string>
+    <string name="export_apk">导出图标包.apk</string>
     <string name="dialog_notice">提示</string>
     <string name="export_complete">导出完成</string>
+    <string name="export_complete_path">导出完成\n保存至：%1$s</string>
     <string name="export_failed_title">导出失败</string>
     <string name="export_mtz_incomplete">MTZ信息不全</string>
     <string name="export_module_incomplete">Module信息不全</string>
+    <string name="export_apk_incomplete">APK信息不全</string>
     <string name="action_complete_info">前往补全</string>
 
     <string name="source_universal">通用</string>
     <string name="source_theme">主题</string>
     <string name="source_module">模块</string>
+    <string name="source_apk">图标包</string>
     <string name="tab_mtz_info">MTZ</string>
     <string name="tab_module_info">Module</string>
+    <string name="tab_apk_info">APK</string>
     <string name="module_install_messages">Module installation messages</string>
 
     <string name="empty_projects">没有项目</string>
@@ -68,6 +73,9 @@
     <string name="language_english">English</string>
     <string name="theme_settings_summary">更改应用主题</string>
     <string name="settings_other">其他</string>
+    <string name="export_directory_title">导出目录</string>
+    <string name="export_directory_download_default">Download</string>
+    <string name="export_directory_reset">恢复默认目录</string>
     <string name="appearance">外观</string>
     <string name="blur_title">模糊</string>
     <string name="blur_summary">启用顶栏和底栏的模糊效果</string>
@@ -91,7 +99,23 @@
     <string name="new_project">新建项目</string>
     <string name="imported_project">导入项目</string>
     <string name="import_failed_title">导入失败</string>
-    <string name="import_invalid_file">文件不符合要求\n只支持.mtz和图标模块.zip</string>
+    <string name="import_invalid_file">文件不符合要求\n支持 .mtz、图标模块 .zip 和标准图标包 .apk</string>
+    <string name="import_in_progress">正在导入…</string>
+    <string name="import_phase_copying">正在复制文件…</string>
+    <string name="import_phase_extracting">正在解压资源…</string>
+    <string name="import_phase_preparing_icons">正在准备解析图标…</string>
+    <string name="import_phase_parsing_icons">正在解析图标 %1$d / %2$d</string>
+    <string name="import_phase_finishing">正在完成导入…</string>
+    <string name="export_phase_preparing">正在准备导出…</string>
+    <string name="export_phase_packaging_icons">正在打包图标 %1$d / %2$d</string>
+    <string name="export_phase_writing_archive">正在写入归档文件…</string>
+    <string name="export_phase_signing">正在签名 APK…</string>
+    <string name="export_phase_finishing">正在完成导出…</string>
+    <string name="export_phase_done">导出完成</string>
+    <string name="export_phase_failed">导出失败</string>
+    <string name="export_close">关闭</string>
+    <string name="export_close_success">完成</string>
+    <string name="export_failed_generic">导出失败</string>
     <string name="unnamed_project">未命名项目</string>
     <string name="sort_app_name">应用名</string>
     <string name="sort_package_name">包名</string>
@@ -115,4 +139,8 @@
     <string name="validation_module_theme">请填写 Module theme</string>
     <string name="validation_module_theme_id">请填写 Module themeid</string>
     <string name="validation_module_id_format">Module id 格式不正确</string>
+    <string name="validation_apk_package">请填写 APK 包名</string>
+    <string name="validation_apk_label">请填写 APK 显示名称</string>
+    <string name="validation_apk_version">请填写 APK 版本号</string>
+    <string name="validation_apk_package_format">APK 包名格式不正确（需形如 com.example.iconpack）</string>
 </resources>
