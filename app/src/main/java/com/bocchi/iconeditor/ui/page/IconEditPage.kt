@@ -63,6 +63,7 @@ import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.InfiniteProgressIndicator
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Close
 import top.yukonga.miuix.kmp.icon.extended.All
@@ -78,20 +79,56 @@ fun IconEditPage(
     items: List<IconListItem>,
     contentPadding: PaddingValues = PaddingValues(),
     loading: Boolean = false,
+    addIconRequest: Int = 0,
     iconFile: (IconAsset) -> File?,
-    onConfirmEdits: (String, String?, Int?, List<Pair<IconAsset, Uri>>, List<Uri>) -> Unit,
+    onConfirmEdits: (
+        isNew: Boolean,
+        originalPackageName: String,
+        packageName: String,
+        appName: String,
+        aliasPackageNames: List<String>,
+        selectedVariantKey: String?,
+        selectedAdditionIndex: Int?,
+        replacements: List<Pair<IconAsset, Uri>>,
+        additions: List<Uri>,
+    ) -> Boolean,
     onDeleteIcon: (IconAsset) -> Unit,
 ) {
     var visibleSheetPackageName by remember { mutableStateOf<String?>(null) }
     var retainedSheetPackageName by remember { mutableStateOf<String?>(null) }
-    val selectedItem = retainedSheetPackageName?.let { packageName ->
-        items.firstOrNull { it.packageName == packageName }
-    }
+    var editingNew by remember { mutableStateOf(false) }
+    var draftPackageName by remember { mutableStateOf("") }
+    var draftAppName by remember { mutableStateOf("") }
+    var draftAliasPackageNames by remember { mutableStateOf(listOf<String>()) }
+    var originalPackageName by remember { mutableStateOf("") }
     var draftVariantKey by remember { mutableStateOf<String?>(null) }
     var draftSelectedAdditionIndex by remember { mutableStateOf<Int?>(null) }
     var draftReplacements by remember { mutableStateOf<List<Pair<IconAsset, Uri>>>(emptyList()) }
     var draftAdditions by remember { mutableStateOf<List<Uri>>(emptyList()) }
     var pendingImport by remember { mutableStateOf<PendingIconImport?>(null) }
+
+    val blankItem = remember {
+        IconListItem(
+            packageName = "",
+            appName = "",
+            variants = emptyList(),
+            selected = null,
+            localApp = null,
+            adapted = false,
+            aliasPackageNames = emptyList(),
+        )
+    }
+    val selectedItem = when {
+        editingNew -> blankItem.copy(
+            packageName = draftPackageName,
+            appName = draftAppName,
+            aliasPackageNames = draftAliasPackageNames,
+        )
+        retainedSheetPackageName != null ->
+            items.firstOrNull { it.packageName == retainedSheetPackageName }
+        else -> null
+    }
+
     val imageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         val import = pendingImport
         if (uri != null && import != null) {
@@ -99,7 +136,7 @@ fun IconEditPage(
                 PendingIconImport.Add -> {
                     val additionIndex = draftAdditions.size
                     draftAdditions = draftAdditions + uri
-                    if (selectedItem?.variants.isNullOrEmpty() && draftSelectedAdditionIndex == null) {
+                    if ((selectedItem?.variants.isNullOrEmpty() || editingNew) && draftSelectedAdditionIndex == null) {
                         draftVariantKey = null
                         draftSelectedAdditionIndex = additionIndex
                     }
@@ -120,21 +157,38 @@ fun IconEditPage(
         }
         pendingImport = null
     }
-    LaunchedEffect(selectedItem?.packageName, selectedItem?.selected?.variantKey) {
-        draftVariantKey = selectedItem?.selected?.variantKey
-    }
-    fun openSheet(packageName: String) {
-        val item = items.firstOrNull { it.packageName == packageName }
+
+    fun resetDraftFields(item: IconListItem?, isNew: Boolean) {
+        editingNew = isNew
+        originalPackageName = if (isNew) "" else item?.packageName.orEmpty()
+        draftPackageName = item?.packageName.orEmpty()
+        draftAppName = item?.appName.orEmpty()
+        draftAliasPackageNames = item?.aliasPackageNames.orEmpty()
         draftVariantKey = item?.selected?.variantKey
         draftSelectedAdditionIndex = null
         draftReplacements = emptyList()
         draftAdditions = emptyList()
+    }
+
+    fun openSheet(packageName: String) {
+        val item = items.firstOrNull { it.packageName == packageName } ?: return
+        resetDraftFields(item, isNew = false)
         retainedSheetPackageName = packageName
         visibleSheetPackageName = packageName
     }
 
+    fun openNewSheet() {
+        resetDraftFields(null, isNew = true)
+        retainedSheetPackageName = "__new__"
+        visibleSheetPackageName = "__new__"
+    }
+
     fun requestCloseSheet() {
         visibleSheetPackageName = null
+    }
+
+    LaunchedEffect(addIconRequest) {
+        if (addIconRequest > 0) openNewSheet()
     }
 
     val listContentPadding = contentPadding.withPageMargins(vertical = 10.dp)
@@ -191,7 +245,7 @@ fun IconEditPage(
     }
     OverlayBottomSheet(
         show = visibleSheetPackageName != null && selectedItem != null,
-        title = stringResource(R.string.icon_styles),
+        title = stringResource(if (editingNew) R.string.action_add_icon else R.string.icon_edit_title),
         startAction = {
             IconButton(onClick = ::requestCloseSheet) {
                 Icon(MiuixIcons.Close, contentDescription = stringResource(R.string.action_close))
@@ -201,15 +255,19 @@ fun IconEditPage(
             IconButton(onClick = {
                 val item = selectedItem
                 if (item != null) {
-                    onConfirmEdits(
-                        item.packageName,
+                    val ok = onConfirmEdits(
+                        editingNew,
+                        originalPackageName,
+                        draftPackageName,
+                        draftAppName,
+                        draftAliasPackageNames,
                         draftVariantKey,
                         draftSelectedAdditionIndex,
                         draftReplacements,
                         draftAdditions,
                     )
+                    if (ok) requestCloseSheet()
                 }
-                requestCloseSheet()
             }) {
                 Icon(MiuixIcons.Ok, contentDescription = stringResource(R.string.action_done))
             }
@@ -218,9 +276,11 @@ fun IconEditPage(
         onDismissFinished = {
             if (visibleSheetPackageName == null) {
                 retainedSheetPackageName = null
+                editingNew = false
                 draftReplacements = emptyList()
                 draftAdditions = emptyList()
                 draftSelectedAdditionIndex = null
+                draftAliasPackageNames = emptyList()
                 pendingImport = null
             }
         },
@@ -228,6 +288,13 @@ fun IconEditPage(
         selectedItem?.let { item ->
             IconActionSheet(
                 iconItem = item,
+                isNew = editingNew,
+                draftPackageName = draftPackageName,
+                draftAppName = draftAppName,
+                draftAliasPackageNames = draftAliasPackageNames,
+                onPackageNameChange = { draftPackageName = it },
+                onAppNameChange = { draftAppName = it },
+                onAliasPackageNamesChange = { draftAliasPackageNames = it },
                 iconFile = iconFile,
                 draftVariantKey = draftVariantKey,
                 draftSelectedAdditionIndex = draftSelectedAdditionIndex,
@@ -318,6 +385,13 @@ fun IconRow(
 @Composable
 fun IconActionSheet(
     iconItem: IconListItem,
+    isNew: Boolean,
+    draftPackageName: String,
+    draftAppName: String,
+    draftAliasPackageNames: List<String>,
+    onPackageNameChange: (String) -> Unit,
+    onAppNameChange: (String) -> Unit,
+    onAliasPackageNamesChange: (List<String>) -> Unit,
     iconFile: (IconAsset) -> File?,
     draftVariantKey: String?,
     draftSelectedAdditionIndex: Int?,
@@ -394,6 +468,8 @@ fun IconActionSheet(
         hasPackageIcon
     val appNameLabel = stringResource(R.string.app_name_label)
     val packageNameLabel = stringResource(R.string.package_name_label)
+    @Suppress("UNUSED_VARIABLE")
+    val newIconMode = isNew
 
     val copyText: (String, String) -> Unit = { label, text ->
         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -419,32 +495,81 @@ fun IconActionSheet(
                 IconPreview(
                     file = (previewVariant ?: iconItem.selected)?.let(iconFile),
                     uri = previewUri,
-                    packageName = iconItem.packageName,
+                    packageName = draftPackageName.ifBlank { iconItem.packageName }.ifBlank { null },
                     size = 100.dp,
                     imageSize = 90.dp,
                 )
+                TextField(
+                    value = draftAppName,
+                    onValueChange = onAppNameChange,
+                    label = appNameLabel,
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                TextField(
+                    value = draftPackageName,
+                    onValueChange = onPackageNameChange,
+                    label = packageNameLabel,
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
                 Text(
-                    modifier = Modifier.combinedClickable(
-                        onClick = {},
-                        onLongClick = { copyText(appNameLabel, iconItem.appName) },
-                    ),
-                    text = iconItem.appName,
-                    style = MiuixTheme.textStyles.title4,
+                    text = stringResource(R.string.alias_package_names),
+                    style = MiuixTheme.textStyles.subtitle,
                     fontWeight = FontWeight.Medium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
                 )
                 Text(
-                    modifier = Modifier.combinedClickable(
-                        onClick = {},
-                        onLongClick = { copyText(packageNameLabel, iconItem.packageName) },
-                    ),
-                    text = iconItem.packageName,
+                    text = stringResource(R.string.alias_package_hint),
+                    style = MiuixTheme.textStyles.subtitle,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    style = MiuixTheme.textStyles.footnote1,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth(),
                 )
+                if (draftAliasPackageNames.isEmpty()) {
+                    Text(
+                        text = stringResource(R.string.alias_package_empty),
+                        style = MiuixTheme.textStyles.subtitle,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                } else {
+                    draftAliasPackageNames.forEachIndexed { index, alias ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            TextField(
+                                value = alias,
+                                onValueChange = { value ->
+                                    onAliasPackageNamesChange(
+                                        draftAliasPackageNames.toMutableList().also { it[index] = value },
+                                    )
+                                },
+                                label = packageNameLabel,
+                                singleLine = true,
+                                modifier = Modifier.weight(1f),
+                            )
+                            IconButton(
+                                onClick = {
+                                    onAliasPackageNamesChange(
+                                        draftAliasPackageNames.toMutableList().also { it.removeAt(index) },
+                                    )
+                                },
+                            ) {
+                                Icon(MiuixIcons.Close, contentDescription = stringResource(R.string.action_close))
+                            }
+                        }
+                    }
+                }
+                Button(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = { onAliasPackageNamesChange(draftAliasPackageNames + "") },
+                ) {
+                    Text(stringResource(R.string.alias_package_add))
+                }
             }
         }
 
@@ -594,6 +719,9 @@ fun iconStatusTags(item: IconListItem): List<String> {
         if (!item.adapted) add(stringResource(R.string.unadapted))
         if (item.variants.size > 1) {
             add(pluralStringResource(R.plurals.style_count, item.variants.size, item.variants.size))
+        }
+        if (item.aliasPackageNames.isNotEmpty()) {
+            add(stringResource(R.string.alias_count_format, item.aliasPackageNames.size))
         }
     }
 }

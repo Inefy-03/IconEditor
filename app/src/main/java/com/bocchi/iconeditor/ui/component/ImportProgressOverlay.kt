@@ -56,6 +56,7 @@ fun ExportProgressOverlay(
     onDismiss: () -> Unit,
     installUri: Uri? = null,
     onInstall: ((Uri) -> Unit)? = null,
+    onOpenDirectory: (() -> Unit)? = null,
 ) {
     if (progress == null) return
     TaskProgressOverlay(
@@ -68,6 +69,7 @@ fun ExportProgressOverlay(
         onDismiss = onDismiss,
         installUri = installUri.takeIf { progress.finished && progress.success },
         onInstall = onInstall,
+        onOpenDirectory = onOpenDirectory.takeIf { progress.finished && progress.success },
         allowCopyLogs = true,
     )
 }
@@ -83,6 +85,7 @@ private fun TaskProgressOverlay(
     onDismiss: (() -> Unit)? = null,
     installUri: Uri? = null,
     onInstall: ((Uri) -> Unit)? = null,
+    onOpenDirectory: (() -> Unit)? = null,
     allowCopyLogs: Boolean = false,
 ) {
     val context = LocalContext.current
@@ -217,7 +220,23 @@ private fun TaskProgressOverlay(
                                 Text(stringResource(R.string.export_apk_install_yes))
                             }
                         }
+                        if (onOpenDirectory != null) {
+                            Button(
+                                modifier = Modifier.fillMaxWidth(),
+                                onClick = onOpenDirectory,
+                            ) {
+                                Text(stringResource(R.string.export_open_directory))
+                            }
+                        }
                     } else {
+                        if (success && onOpenDirectory != null) {
+                            Button(
+                                modifier = Modifier.fillMaxWidth(),
+                                onClick = onOpenDirectory,
+                            ) {
+                                Text(stringResource(R.string.export_open_directory))
+                            }
+                        }
                         Button(onClick = onDismiss) {
                             Text(
                                 text = if (success) {

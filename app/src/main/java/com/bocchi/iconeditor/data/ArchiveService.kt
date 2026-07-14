@@ -194,6 +194,57 @@ object ArchiveService {
         return packageName
     }
 
+    fun renameIconPackage(workDir: File, from: String, to: String) {
+        val oldPackage = from.trim()
+        val newPackage = to.trim()
+        if (oldPackage == newPackage) return
+        require(oldPackage.isNotEmpty() && newPackage.isNotEmpty()) { "包名不能为空" }
+        val assets = scanIconAssets(workDir)
+        require(assets.none { it.packageName == newPackage }) { "包名已存在：$newPackage" }
+        val toRename = assets.filter { it.packageName == oldPackage }
+            .sortedWith(
+                compareBy<IconAsset> { variantOrder(it.variantKey, oldPackage) }
+                    .thenBy { it.fileName },
+            )
+        if (toRename.isEmpty()) return
+        val iconRoot = File(workDir, "icons/res/drawable-xxhdpi")
+        val operationId = UUID.randomUUID().toString()
+        data class RenameMove(val source: File, val staged: File, val target: File)
+        val moves = toRename.mapIndexed { index, asset ->
+            val source = File(workDir, asset.archivePath)
+            val suffix = if (index == 0) "" else "_$index"
+            RenameMove(
+                source = source,
+                staged = File(iconRoot, ".iconeditor-rename-$operationId-$index.tmp"),
+                target = File(iconRoot, "$newPackage$suffix.${source.extension}"),
+            )
+        }
+        try {
+            moves.forEach { moveFile(it.source, it.staged) }
+        } catch (error: Throwable) {
+            moves.asReversed().forEach { move ->
+                if (move.staged.exists()) moveFile(move.staged, move.source)
+            }
+            throw error
+        }
+        try {
+            moves.forEach { move ->
+                if (move.target.exists()) move.target.delete()
+                moveFile(move.staged, move.target)
+            }
+        } catch (error: Throwable) {
+            moves.forEach { move ->
+                if (move.target.exists() && !move.staged.exists()) {
+                    moveFile(move.target, move.staged)
+                }
+            }
+            moves.forEach { move ->
+                if (move.staged.exists()) moveFile(move.staged, move.source)
+            }
+            throw error
+        }
+    }
+
     fun exportArchive(
         metadata: ProjectMetadata,
         workDir: File,

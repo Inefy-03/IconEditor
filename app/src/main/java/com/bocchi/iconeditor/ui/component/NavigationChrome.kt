@@ -232,6 +232,7 @@ fun AppTopBar(
     infoTab: InfoTab = InfoTab.Mtz,
     onInfoTab: (InfoTab) -> Unit = {},
     onImportIcons: () -> Unit = {},
+    onAddIcon: () -> Unit = {},
 ) {
     var showIconSortMenu by remember { mutableStateOf(false) }
     var showIconOptionsMenu by remember { mutableStateOf(false) }
@@ -306,11 +307,23 @@ fun AppTopBar(
                         ) {
                             ListPopupColumn {
                                 DropdownImpl(
-                                    item = DropdownItem(text = stringResource(R.string.action_import_icons)),
+                                    item = DropdownItem(text = stringResource(R.string.action_add_icon)),
                                     optionSize = IconOptionsMenuCount,
                                     isSelected = false,
                                     index = 0,
                                     isFirst = true,
+                                    isLast = false,
+                                    onSelectedIndexChange = {
+                                        showIconOptionsMenu = false
+                                        onAddIcon()
+                                    },
+                                )
+                                DropdownImpl(
+                                    item = DropdownItem(text = stringResource(R.string.action_import_icons)),
+                                    optionSize = IconOptionsMenuCount,
+                                    isSelected = false,
+                                    index = 1,
+                                    isFirst = false,
                                     isLast = false,
                                     onSelectedIndexChange = {
                                         showIconOptionsMenu = false
@@ -322,7 +335,7 @@ fun AppTopBar(
                                     item = DropdownItem(text = stringResource(R.string.show_local_apps)),
                                     optionSize = IconOptionsMenuCount,
                                     isSelected = iconPreferences.showLocalApps,
-                                    index = 1,
+                                    index = 2,
                                     isFirst = false,
                                     isLast = false,
                                     onSelectedIndexChange = {
@@ -338,7 +351,7 @@ fun AppTopBar(
                                     item = DropdownItem(text = stringResource(R.string.show_system_apps)),
                                     optionSize = IconOptionsMenuCount,
                                     isSelected = iconPreferences.showSystemApps,
-                                    index = 2,
+                                    index = 3,
                                     isFirst = false,
                                     isLast = false,
                                     onSelectedIndexChange = {
@@ -353,7 +366,7 @@ fun AppTopBar(
                                     item = DropdownItem(text = stringResource(R.string.only_show_multiple_styles)),
                                     optionSize = IconOptionsMenuCount,
                                     isSelected = iconPreferences.onlyShowMultipleStyles,
-                                    index = 3,
+                                    index = 4,
                                     isFirst = false,
                                     isLast = false,
                                     onSelectedIndexChange = {
@@ -370,7 +383,7 @@ fun AppTopBar(
                                     item = DropdownItem(text = stringResource(R.string.only_show_unadapted_icons)),
                                     optionSize = IconOptionsMenuCount,
                                     isSelected = iconPreferences.onlyShowUnadaptedIcons,
-                                    index = 4,
+                                    index = 5,
                                     isFirst = false,
                                     isLast = true,
                                     onSelectedIndexChange = {
@@ -604,7 +617,7 @@ private fun PopupGroupDivider() {
 }
 
 private const val IconSortOptionCount = 3
-private const val IconOptionsMenuCount = 5
+private const val IconOptionsMenuCount = 6
 private const val ProjectSortOptionCount = 3
 
 @Composable

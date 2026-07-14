@@ -49,6 +49,36 @@ object IconMappingBridge {
         return iconFileName.replace(variantSuffixRegex, "")
     }
 
+    fun normalizeAliasPackageNames(aliases: List<String>, primary: String): List<String> {
+        val seen = linkedSetOf(primary)
+        val result = mutableListOf<String>()
+        for (raw in aliases) {
+            val trimmed = raw.trim()
+            if (trimmed.isEmpty() || trimmed in seen) continue
+            seen += trimmed
+            result += trimmed
+        }
+        return result.sorted()
+    }
+
+    fun appfilterItems(forMapping: IconMappingEntry): List<Pair<String, String>> {
+        if (forMapping.drawableName.isBlank()) return emptyList()
+        val items = forMapping.components.map { it to forMapping.drawableName }.toMutableList()
+        val existing = items.map { it.first }.toMutableSet()
+        for (alias in normalizeAliasPackageNames(forMapping.aliasPackageNames, forMapping.packageName)) {
+            val component = fallbackComponent(alias)
+            if (component !in existing) {
+                items += component to forMapping.drawableName
+                existing += component
+            }
+        }
+        return items
+    }
+
+    fun fallbackComponent(packageName: String): String {
+        return "ComponentInfo{$packageName/$packageName}"
+    }
+
     fun isPackageDerivedDrawableName(drawableName: String, packageName: String): Boolean {
         if (drawableName.isBlank()) return true
         if (drawableName == packageName) return true
@@ -211,6 +241,7 @@ object IconMappingBridge {
                             resolveLauncherComponent(pm, packageName) ?: fallbackComponent(packageName),
                         ),
                     resourceZipPath = previous?.resourceZipPath,
+                    aliasPackageNames = previous?.aliasPackageNames.orEmpty(),
                 )
             },
         )
@@ -237,6 +268,9 @@ object IconMappingBridge {
                 components = next.components.takeIf { it.isNotEmpty() }
                     ?: previous?.components.orEmpty(),
                 resourceZipPath = next.resourceZipPath ?: previous?.resourceZipPath,
+                aliasPackageNames = next.aliasPackageNames.ifEmpty {
+                    previous?.aliasPackageNames.orEmpty()
+                },
             )
         }
         return IconMappingIndex(entries = merged.values.sortedBy { it.packageName })
@@ -270,11 +304,10 @@ object IconMappingBridge {
             root.appendChild(scaleItem)
         }
         mappings.forEach { mapping ->
-            if (mapping.drawableName.isBlank()) return@forEach
-            mapping.components.forEach { component ->
+            appfilterItems(mapping).forEach { (component, drawable) ->
                 val item = doc.createElement("item")
                 item.setAttribute("component", component)
-                item.setAttribute("drawable", mapping.drawableName)
+                item.setAttribute("drawable", drawable)
                 root.appendChild(item)
             }
         }
@@ -322,10 +355,6 @@ object IconMappingBridge {
             }
             "ComponentInfo{${activity.packageName}/$activityName}"
         }.getOrNull()
-    }
-
-    private fun fallbackComponent(packageName: String): String {
-        return "ComponentInfo{$packageName/$packageName}"
     }
 
     private fun parseXml(input: InputStream): Document {

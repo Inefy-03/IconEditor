@@ -11,6 +11,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.bocchi.iconeditor.R
 import com.bocchi.iconeditor.data.ApkPackAssets
+import com.bocchi.iconeditor.data.IconMappingBridge
 import com.bocchi.iconeditor.data.InvalidIconPackApkException
 import com.bocchi.iconeditor.data.InvalidProjectArchiveException
 import com.bocchi.iconeditor.data.NoMaskLayersFoundException
@@ -86,6 +87,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     var exportProgress by mutableStateOf<ExportProgress?>(null)
         private set
     var pendingApkInstallUri by mutableStateOf<Uri?>(null)
+        private set
+    var lastExportUri by mutableStateOf<Uri?>(null)
         private set
     var projectsScrollToTopRequest by mutableIntStateOf(0)
         private set
@@ -607,41 +610,165 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun commitIconEdits(
+        isNew: Boolean,
+        originalPackageName: String,
         packageName: String,
+        appName: String,
+        aliasPackageNames: List<String>,
         selectedVariantKey: String?,
         selectedAdditionIndex: Int?,
         replacements: List<Pair<IconAsset, Uri>>,
         additions: List<Uri>,
-    ) = runAction {
-        selectedProjectId?.let { projectId ->
-            replacements.forEach { (asset, uri) ->
-                repository.replaceIcon(projectId, asset, uri)
+    ): Boolean {
+        return try {
+            val projectId = selectedProjectId ?: return false
+            val trimmedPackage = packageName.trim()
+            val trimmedAppName = appName.trim()
+            val original = originalPackageName.trim()
+            val aliases = IconMappingBridge.normalizeAliasPackageNames(aliasPackageNames, trimmedPackage)
+
+            if (!IconMappingBridge.isValidAndroidPackageName(trimmedPackage)) {
+                error(getApplication<Application>().getString(R.string.icon_edit_invalid_package, trimmedPackage))
             }
-            val addedVariantKeys = additions.map { uri ->
-                repository.addIconVariant(projectId, packageName, uri)
+            if (trimmedAppName.isEmpty()) {
+                error(getApplication<Application>().getString(R.string.icon_edit_empty_app_name))
             }
-            val selectedBeforeNormalization = selectedAdditionIndex
-                ?.let(addedVariantKeys::getOrNull)
-                ?: selectedVariantKey
-            val normalizedSelectedKey = repository.normalizeIconVariants(
-                id = projectId,
-                packageName = packageName,
-                selectedVariantKey = selectedBeforeNormalization,
-            )
-            if (normalizedSelectedKey != null) {
-                iconPreferences = iconPreferences.copy(
-                    selectedVariants = iconPreferences.selectedVariants +
-                        (packageName to normalizedSelectedKey),
+            for (alias in aliases) {
+                if (!IconMappingBridge.isValidAndroidPackageName(alias)) {
+                    error(getApplication<Application>().getString(R.string.icon_edit_invalid_alias, alias))
+                }
+            }
+
+            val existingPackages = icons.map { it.packageName }.toSet()
+            val mapping = repository.loadIconMapping(projectId)
+            for (alias in aliases) {
+                if (existingPackages.contains(alias) && alias != original) {
+                    error(getApplication<Application>().getString(R.string.icon_edit_alias_has_icon, alias))
+                }
+                val ownedByOther = mapping.entries.firstOrNull { entry ->
+                    entry.packageName != trimmedPackage &&
+                        entry.packageName != original &&
+                        entry.aliasPackageNames.contains(alias)
+                }
+                if (ownedByOther != null) {
+                    error(
+                        getApplication<Application>().getString(
+                            R.string.icon_edit_alias_owned,
+                            alias,
+                            ownedByOther.packageName,
+                        ),
+                    )
+                }
+                if (
+                    mapping.entries.any {
+                        it.packageName == alias && it.packageName != trimmedPackage && it.packageName != original
+                    }
+                ) {
+                    error(getApplication<Application>().getString(R.string.icon_edit_alias_is_primary, alias))
+                }
+            }
+
+            if (isNew) {
+                if (existingPackages.contains(trimmedPackage)) {
+                    error(getApplication<Application>().getString(R.string.icon_edit_package_exists, trimmedPackage))
+                }
+                if (additions.isEmpty()) {
+                    error(getApplication<Application>().getString(R.string.icon_edit_need_image))
+                }
+            } else if (original.isNotEmpty() && original != trimmedPackage) {
+                if (existingPackages.contains(trimmedPackage)) {
+                    error(getApplication<Application>().getString(R.string.icon_edit_package_exists, trimmedPackage))
+                }
+                replacements.forEach { (asset, uri) ->
+                    repository.replaceIcon(projectId, asset, uri)
+                }
+                repository.renameIconPackage(projectId, original, trimmedPackage)
+                val prefs = iconPreferences
+                val migratedSelected = prefs.selectedVariants[original]?.let { selected ->
+                    when {
+                        selected == original -> trimmedPackage
+                        selected.startsWith("${original}_") ->
+                            trimmedPackage + selected.removePrefix(original)
+                        else -> trimmedPackage
+                    }
+                }
+                var nextVariants = prefs.selectedVariants - original
+                if (migratedSelected != null) {
+                    nextVariants = nextVariants + (trimmedPackage to migratedSelected)
+                }
+                var nextCustoms = prefs.customAppNames - original
+                prefs.customAppNames[original]?.let { custom ->
+                    nextCustoms = nextCustoms + (trimmedPackage to custom)
+                }
+                iconPreferences = prefs.copy(
+                    selectedVariants = nextVariants,
+                    customAppNames = nextCustoms,
                 )
             } else {
-                iconPreferences = iconPreferences.copy(
-                    selectedVariants = iconPreferences.selectedVariants - packageName,
-                )
+                replacements.forEach { (asset, uri) ->
+                    repository.replaceIcon(projectId, asset, uri)
+                }
             }
+
+            var workingSelectedKey = if (isNew || original == trimmedPackage) {
+                selectedVariantKey
+            } else {
+                selectedVariantKey?.let { selected ->
+                    when {
+                        selected == original -> trimmedPackage
+                        selected.startsWith("${original}_") ->
+                            trimmedPackage + selected.removePrefix(original)
+                        else -> trimmedPackage
+                    }
+                }
+            }
+
+            val addedVariantKeys = additions.map { uri ->
+                repository.addIconVariant(projectId, trimmedPackage, uri)
+            }
+            workingSelectedKey = selectedAdditionIndex
+                ?.let(addedVariantKeys::getOrNull)
+                ?: if (isNew) addedVariantKeys.firstOrNull() else workingSelectedKey
+
+            val normalizedSelectedKey = repository.normalizeIconVariants(
+                id = projectId,
+                packageName = trimmedPackage,
+                selectedVariantKey = workingSelectedKey,
+            )
+
+            val catalogName = packageNameRepository.resolveAppName(trimmedPackage, null)
+            var nextCustoms = iconPreferences.customAppNames.toMutableMap()
+            if (trimmedAppName != trimmedPackage && trimmedAppName != catalogName) {
+                nextCustoms[trimmedPackage] = trimmedAppName
+            } else {
+                nextCustoms.remove(trimmedPackage)
+            }
+            var nextVariants = iconPreferences.selectedVariants.toMutableMap()
+            if (normalizedSelectedKey != null) {
+                nextVariants[trimmedPackage] = normalizedSelectedKey
+            } else {
+                nextVariants.remove(trimmedPackage)
+            }
+            iconPreferences = iconPreferences.copy(
+                selectedVariants = nextVariants,
+                customAppNames = nextCustoms,
+            )
             repository.saveIconPreferences(projectId, iconPreferences)
+            repository.updateIconAliasPackageNames(projectId, trimmedPackage, aliases)
             icons = repository.loadIcons(projectId)
-            repository.syncIconMapping(projectId)
             refresh()
+            showMessage(
+                R.string.dialog_notice,
+                if (isNew) {
+                    getApplication<Application>().getString(R.string.icon_edit_added, trimmedAppName)
+                } else {
+                    getApplication<Application>().getString(R.string.icon_edit_updated, trimmedAppName)
+                },
+            )
+            true
+        } catch (error: Throwable) {
+            showError(error)
+            false
         }
     }
 
@@ -673,10 +800,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         pendingApkInstallUri = null
     }
 
+    fun clearLastExportUri() {
+        lastExportUri = null
+    }
+
     fun exportProject(id: String, format: ExportFormat, target: Uri, locationLabel: String = "") {
         viewModelScope.launch {
             isExporting = true
             pendingApkInstallUri = null
+            lastExportUri = target
             exportProgress = ExportProgress(com.bocchi.iconeditor.model.ExportPhase.Preparing)
             val progressChannel = Channel<ExportProgress>(capacity = Channel.UNLIMITED)
             var lastProgress: ExportProgress? = null
@@ -756,6 +888,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun visibleIconItems(): List<IconListItem> {
         val localByPackage = localApps.associateBy { it.packageName }
         val grouped = icons.groupBy { it.packageName }
+        val mappingByPackage = selectedProjectId
+            ?.let { repository.loadIconMapping(it) }
+            ?.entries
+            ?.associateBy { it.packageName }
+            .orEmpty()
+        val coveredByAlias = mappingByPackage.values
+            .flatMap { it.aliasPackageNames }
+            .toSet()
         val normalLocalPackages = localApps
             .filter { !it.system }
             .map { it.packageName }
@@ -779,18 +919,25 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             val selectedKey = iconPreferences.selectedVariants[packageName]
             val selected = variants.firstOrNull { it.variantKey == selectedKey } ?: variants.firstOrNull()
             val local = localByPackage[packageName]
+            val customName = iconPreferences.customAppNames[packageName]
+            val aliases = mappingByPackage[packageName]?.aliasPackageNames.orEmpty()
             IconListItem(
                 packageName = packageName,
-                appName = packageNameRepository.resolveAppName(packageName, local?.appName),
+                appName = packageNameRepository.resolveAppName(
+                    packageName,
+                    customName ?: local?.appName,
+                ),
                 variants = variants,
                 selected = selected,
                 localApp = local,
-                adapted = variants.isNotEmpty(),
+                adapted = variants.isNotEmpty() || packageName in coveredByAlias,
+                aliasPackageNames = aliases,
             )
         }.filter { item ->
             val matchesSearch = query.isBlank() ||
                 item.packageName.lowercase().contains(query) ||
                 item.appName.lowercase().contains(query) ||
+                item.aliasPackageNames.any { it.lowercase().contains(query) } ||
                 item.selected?.archivePath?.lowercase()?.contains(query) == true
             val matchesMultipleStyles = !iconPreferences.onlyShowMultipleStyles || item.variants.size >= 2
             val matchesUnadapted = !iconPreferences.onlyShowUnadaptedIcons || !item.adapted

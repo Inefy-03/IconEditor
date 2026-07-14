@@ -95,6 +95,25 @@
     <string name="project_author_format">Author: %1$s</string>
 
     <string name="icon_styles">Icon styles</string>
+    <string name="action_add_icon">Add icon</string>
+    <string name="icon_edit_title">Edit icon</string>
+    <string name="alias_package_names">Extra package names</string>
+    <string name="alias_package_hint">Map the same icon to more app packages</string>
+    <string name="alias_package_add">Add package name</string>
+    <string name="alias_package_empty">No extra package names</string>
+    <string name="alias_count_format">+%1$d packages</string>
+    <string name="icon_edit_invalid_package">Invalid package name: %1$s</string>
+    <string name="icon_edit_empty_app_name">App name cannot be empty</string>
+    <string name="icon_edit_invalid_alias">Invalid extra package name: %1$s</string>
+    <string name="icon_edit_alias_has_icon">Extra package %1$s already has its own icon</string>
+    <string name="icon_edit_alias_owned">Extra package %1$s is already used by %2$s</string>
+    <string name="icon_edit_alias_is_primary">Extra package %1$s is already a primary package</string>
+    <string name="icon_edit_package_exists">Package already exists: %1$s</string>
+    <string name="icon_edit_need_image">Please choose an icon image</string>
+    <string name="icon_edit_added">Added %1$s</string>
+    <string name="icon_edit_updated">Updated %1$s</string>
+    <string name="export_open_directory">Open folder</string>
+    <string name="export_open_directory_failed">Unable to open export folder</string>
     <string name="copied_format">Copied: %1$s</string>
     <string name="app_name_label">App name</string>
     <string name="package_name_label">Package name</string>

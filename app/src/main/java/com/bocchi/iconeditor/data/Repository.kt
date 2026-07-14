@@ -293,6 +293,51 @@ class ProjectRepository(private val context: Context) {
         syncIconMapping(id)
     }
 
+    fun renameIconPackage(id: String, from: String, to: String) {
+        ArchiveService.renameIconPackage(workDir(id), from, to)
+        markDirty(id)
+        // Remap selected variants and mapping package key are handled by callers;
+        // sync rebuilds entries for on-disk icons while preserving aliases of remaining keys.
+        val existing = loadIconMapping(id)
+        val remapped = IconMappingIndex(
+            entries = existing.entries.map { entry ->
+                if (entry.packageName == from) {
+                    entry.copy(
+                        packageName = to,
+                        components = entry.components.map { component ->
+                            val pkg = IconMappingBridge.parseComponentInfo(component)?.first
+                            if (pkg == from) {
+                                IconMappingBridge.fallbackComponent(to)
+                            } else {
+                                component
+                            }
+                        }.distinct(),
+                    )
+                } else {
+                    entry
+                }
+            },
+        )
+        saveIconMapping(id, remapped)
+        syncIconMapping(id)
+    }
+
+    fun updateIconAliasPackageNames(id: String, packageName: String, aliases: List<String>) {
+        val normalized = IconMappingBridge.normalizeAliasPackageNames(aliases, packageName)
+        syncIconMapping(id)
+        val mapping = loadIconMapping(id)
+        val updated = IconMappingIndex(
+            entries = mapping.entries.map { entry ->
+                if (entry.packageName == packageName) {
+                    entry.copy(aliasPackageNames = normalized)
+                } else {
+                    entry
+                }
+            },
+        )
+        saveIconMapping(id, updated)
+    }
+
     fun previewIconsFromPack(
         projectId: String,
         uri: Uri,

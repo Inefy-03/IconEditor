@@ -140,6 +140,7 @@ data class IconMappingEntry(
     val drawableName: String,
     val components: List<String> = emptyList(),
     val resourceZipPath: String? = null,
+    val aliasPackageNames: List<String> = emptyList(),
 )
 
 @Serializable
@@ -202,6 +203,7 @@ data class IconPreferences(
     val onlyShowMultipleStyles: Boolean = false,
     val onlyShowUnadaptedIcons: Boolean = false,
     val selectedVariants: Map<String, String> = emptyMap(),
+    val customAppNames: Map<String, String> = emptyMap(),
 )
 
 @Serializable
@@ -240,6 +242,7 @@ data class IconListItem(
     val selected: IconAsset?,
     val localApp: LocalAppInfo?,
     val adapted: Boolean,
+    val aliasPackageNames: List<String> = emptyList(),
 )
 
 @Serializable

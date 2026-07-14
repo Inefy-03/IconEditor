@@ -139,4 +139,30 @@ class IconMappingBridgeTest {
         assertEquals("ComponentInfo{com.example.app/com.example.app.Launcher}", app.components.single())
         assertEquals("keep_drawable", keep.drawableName)
     }
+
+    @Test
+    fun normalizeAliasPackageNamesDropsPrimaryAndDuplicates() {
+        val aliases = IconMappingBridge.normalizeAliasPackageNames(
+            listOf(" com.a ", "com.b", "com.a", "com.primary"),
+            primary = "com.primary",
+        )
+        assertEquals(listOf("com.a", "com.b"), aliases)
+    }
+
+    @Test
+    fun buildAppfilterXmlIncludesAliasFallbackComponents() {
+        val xml = IconMappingBridge.buildAppfilterXml(
+            mappings = listOf(
+                com.bocchi.iconeditor.model.IconMappingEntry(
+                    packageName = "com.primary",
+                    drawableName = "icon_primary",
+                    components = listOf("ComponentInfo{com.primary/com.primary.Main}"),
+                    aliasPackageNames = listOf("com.alias"),
+                ),
+            ),
+        )
+        assertTrue(xml.contains("""component="ComponentInfo{com.primary/com.primary.Main}""""))
+        assertTrue(xml.contains("""component="ComponentInfo{com.alias/com.alias}""""))
+        assertTrue(xml.contains("""drawable="icon_primary""""))
+    }
 }

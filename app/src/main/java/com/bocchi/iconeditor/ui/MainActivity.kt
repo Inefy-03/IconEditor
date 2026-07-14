@@ -186,6 +186,7 @@ private fun IconEditorApp(
     var exportPickerProject by remember { mutableStateOf<ProjectSummary?>(null) }
     var incompleteExport by remember { mutableStateOf<Pair<ProjectSummary, ExportFormat>?>(null) }
     var infoTab by remember { mutableStateOf(InfoTab.Mtz) }
+    var addIconRequest by remember { mutableIntStateOf(0) }
     var rootTabIndex by rememberSaveable { mutableStateOf(rootScreenIndex(Screen.Projects)) }
     val navBackStack = rememberNavBackStack(Screen.Projects)
     val miuixBackdrop = rememberMiuixBlurBackdrop(viewModel.settings.blurEnabled)
@@ -469,15 +470,31 @@ private fun IconEditorApp(
                                     onImportIcons = {
                                         iconPackImportLauncher.launch(ProjectImportMimeTypes.toTypedArray())
                                     },
+                                    onAddIcon = { addIconRequest += 1 },
                                 ) { contentPadding ->
                                     IconEditPage(
                                         items = viewModel.visibleIconItems(),
                                         contentPadding = contentPadding,
                                         loading = viewModel.isProjectLoading,
+                                        addIconRequest = addIconRequest,
                                         iconFile = viewModel::iconFile,
-                                        onConfirmEdits = { packageName, selectedVariantKey, selectedAdditionIndex, replacements, additions ->
+                                        onConfirmEdits = {
+                                                isNew,
+                                                originalPackageName,
+                                                packageName,
+                                                appName,
+                                                aliasPackageNames,
+                                                selectedVariantKey,
+                                                selectedAdditionIndex,
+                                                replacements,
+                                                additions,
+                                            ->
                                             viewModel.commitIconEdits(
+                                                isNew = isNew,
+                                                originalPackageName = originalPackageName,
                                                 packageName = packageName,
+                                                appName = appName,
+                                                aliasPackageNames = aliasPackageNames,
                                                 selectedVariantKey = selectedVariantKey,
                                                 selectedAdditionIndex = selectedAdditionIndex,
                                                 replacements = replacements,
@@ -608,12 +625,24 @@ private fun IconEditorApp(
                     installUri = viewModel.pendingApkInstallUri,
                     onDismiss = {
                         viewModel.clearPendingApkInstall()
+                        viewModel.clearLastExportUri()
                         viewModel.dismissExportProgress()
                     },
                     onInstall = { uri ->
                         if (installExportedApk(context, uri)) {
                             viewModel.clearPendingApkInstall()
+                            viewModel.clearLastExportUri()
                             viewModel.dismissExportProgress()
+                        }
+                    },
+                    onOpenDirectory = {
+                        val opened = ExportDirectoryHelper.openExportDirectory(context, viewModel.settings)
+                        if (!opened) {
+                            Toast.makeText(
+                                context,
+                                context.getString(R.string.export_open_directory_failed),
+                                Toast.LENGTH_SHORT,
+                            ).show()
                         }
                     },
                 )
@@ -858,6 +887,7 @@ private fun SecondaryScene(
     infoTab: InfoTab = InfoTab.Mtz,
     onInfoTab: (InfoTab) -> Unit = {},
     onImportIcons: () -> Unit = {},
+    onAddIcon: () -> Unit = {},
     content: @Composable (PaddingValues) -> Unit,
 ) {
     val topBarBackdrop = rememberMiuixBlurBackdrop(blurEnabled)
@@ -876,6 +906,7 @@ private fun SecondaryScene(
                 infoTab = infoTab,
                 onInfoTab = onInfoTab,
                 onImportIcons = onImportIcons,
+                onAddIcon = onAddIcon,
             )
         },
         containerColor = pageBackground,

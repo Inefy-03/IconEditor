@@ -93,6 +93,34 @@ object ExportDirectoryHelper {
         context.contentResolver.update(uri, values, null, null)
     }
 
+    /** Best-effort open of the configured export folder (or Downloads). */
+    fun openExportDirectory(context: Context, settings: AppSettings): Boolean {
+        val customTree = settings.exportDirectoryUri.takeIf { it.isNotBlank() }?.let(Uri::parse)
+        val folderUri = if (customTree != null) {
+            DocumentsContract.buildDocumentUriUsingTree(
+                customTree,
+                DocumentsContract.getTreeDocumentId(customTree),
+            )
+        } else {
+            defaultDownloadsDocumentUri
+        }
+        val viewOk = runCatching {
+            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                setDataAndType(folderUri, DocumentsContract.Document.MIME_TYPE_DIR)
+                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+        }.isSuccess
+        if (viewOk) return true
+        return runCatching {
+            val intent = android.content.Intent(android.app.DownloadManager.ACTION_VIEW_DOWNLOADS).apply {
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+        }.isSuccess
+    }
+
     fun abortPendingExport(context: Context, uri: Uri) {
         if (!isDownloadsUri(uri)) return
         runCatching {

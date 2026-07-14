@@ -95,6 +95,25 @@
     <string name="project_author_format">作者：%1$s</string>
 
     <string name="icon_styles">图标样式</string>
+    <string name="action_add_icon">新增图标</string>
+    <string name="icon_edit_title">编辑图标</string>
+    <string name="alias_package_names">额外包名</string>
+    <string name="alias_package_hint">同一图标映射到更多应用包名</string>
+    <string name="alias_package_add">添加额外包名</string>
+    <string name="alias_package_empty">暂无额外包名</string>
+    <string name="alias_count_format">+%1$d 包名</string>
+    <string name="icon_edit_invalid_package">包名格式无效：%1$s</string>
+    <string name="icon_edit_empty_app_name">应用名不能为空</string>
+    <string name="icon_edit_invalid_alias">额外包名格式无效：%1$s</string>
+    <string name="icon_edit_alias_has_icon">额外包名 %1$s 已有独立图标</string>
+    <string name="icon_edit_alias_owned">额外包名 %1$s 已被 %2$s 使用</string>
+    <string name="icon_edit_alias_is_primary">额外包名 %1$s 已是其他图标的主包名</string>
+    <string name="icon_edit_package_exists">包名已存在：%1$s</string>
+    <string name="icon_edit_need_image">请选择图标文件</string>
+    <string name="icon_edit_added">已新增 %1$s</string>
+    <string name="icon_edit_updated">已更新 %1$s</string>
+    <string name="export_open_directory">打开所在目录</string>
+    <string name="export_open_directory_failed">无法打开导出目录</string>
     <string name="copied_format">已复制: %1$s</string>
     <string name="app_name_label">应用名</string>
     <string name="package_name_label">包名</string>
