@@ -1,6 +1,7 @@
 package com.bocchi.iconeditor.ui.page
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -68,6 +69,8 @@ fun ProjectsPage(
     scrollToTopRequest: Int = 0,
     onEditInfo: (ProjectSummary) -> Unit,
     onEditIcons: (ProjectSummary) -> Unit,
+    onSync: (ProjectSummary) -> Unit,
+    onRename: (ProjectSummary) -> Unit,
     onDelete: (ProjectSummary) -> Unit,
     onExport: (ProjectSummary) -> Unit,
 ) {
@@ -114,7 +117,16 @@ fun ProjectsPage(
             overscrollEffect = null,
         ) {
             gridItems(sortedProjects, key = { it.id }) { project ->
-                ProjectCard(project, metadata[project.id] ?: ProjectMetadata(), onEditInfo, onEditIcons, onDelete, onExport)
+                ProjectCard(
+                    project,
+                    metadata[project.id] ?: ProjectMetadata(),
+                    onEditInfo,
+                    onEditIcons,
+                    onSync,
+                    onRename,
+                    onDelete,
+                    onExport,
+                )
             }
         }
     }
@@ -143,6 +155,8 @@ fun ProjectCard(
     metadata: ProjectMetadata,
     onEditInfo: (ProjectSummary) -> Unit,
     onEditIcons: (ProjectSummary) -> Unit,
+    onSync: (ProjectSummary) -> Unit,
+    onRename: (ProjectSummary) -> Unit,
     onDelete: (ProjectSummary) -> Unit,
     onExport: (ProjectSummary) -> Unit,
 ) {
@@ -164,7 +178,9 @@ fun ProjectCard(
             ) {
                 Text(
                     text = displayTitle,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { onRename(project) },
                     style = MiuixTheme.textStyles.title4,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
@@ -212,6 +228,11 @@ fun ProjectCard(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             ProjectActionButton(
+                imageVector = MiuixIcons.Replace,
+                contentDescription = stringResource(R.string.action_rename),
+                onClick = { onRename(project) },
+            )
+            ProjectActionButton(
                 imageVector = MiuixIcons.Edit,
                 contentDescription = stringResource(R.string.action_edit_info),
                 onClick = { onEditInfo(project) },
@@ -221,9 +242,14 @@ fun ProjectCard(
                 contentDescription = stringResource(R.string.action_edit_icons),
                 onClick = { onEditIcons(project) },
             )
-            Spacer(Modifier.weight(1f))
             ProjectActionButton(
                 imageVector = MiuixIcons.Forward,
+                contentDescription = stringResource(R.string.action_sync),
+                onClick = { onSync(project) },
+            )
+            Spacer(Modifier.weight(1f))
+            ProjectActionButton(
+                imageVector = MiuixIcons.Download,
                 contentDescription = stringResource(R.string.action_export),
                 onClick = { onExport(project) },
             )

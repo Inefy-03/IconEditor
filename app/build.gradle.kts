@@ -138,6 +138,11 @@ dependencies {
     implementation(libs.miuix.blur)
     implementation(libs.miuix.navigation3.ui)
 
+    implementation(libs.androidx.camera.camera2)
+    implementation(libs.androidx.camera.lifecycle)
+    implementation(libs.androidx.camera.view)
+    implementation(libs.mlkit.barcode.scanning)
+
     debugImplementation(libs.compose.ui.tooling)
     ksp(libs.androidx.room.compiler)
     testImplementation(libs.junit)

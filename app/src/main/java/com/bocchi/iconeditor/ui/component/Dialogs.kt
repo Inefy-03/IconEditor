@@ -30,8 +30,10 @@ import com.bocchi.iconeditor.model.SourceType
 import top.yukonga.miuix.kmp.basic.Button
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import com.bocchi.iconeditor.ui.page.projectDisplayTitle
 
 @Composable
 fun EmptyState(
@@ -75,6 +77,47 @@ fun ConfirmDeleteDialog(project: ProjectSummary?, metadata: ProjectMetadata?, on
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Button(modifier = Modifier.weight(1f), onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
             Button(modifier = Modifier.weight(1f), onClick = { project?.let(onConfirm) }) { Text(stringResource(R.string.action_confirm)) }
+        }
+    }
+}
+
+@Composable
+fun RenameProjectDialog(
+    project: ProjectSummary?,
+    metadata: ProjectMetadata?,
+    onDismiss: () -> Unit,
+    onConfirm: (ProjectSummary, String) -> Unit,
+) {
+    var name by remember { mutableStateOf("") }
+    LaunchedEffect(project?.id, metadata) {
+        name = when {
+            project != null && metadata != null -> projectDisplayTitle(project, metadata)
+            else -> project?.name.orEmpty()
+        }
+    }
+    OverlayDialog(
+        show = project != null,
+        title = stringResource(R.string.rename_project_title),
+        onDismissRequest = onDismiss,
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            TextField(
+                value = name,
+                onValueChange = { name = it },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Button(modifier = Modifier.weight(1f), onClick = onDismiss) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+                Button(
+                    modifier = Modifier.weight(1f),
+                    onClick = { project?.let { onConfirm(it, name) } },
+                    enabled = name.trim().isNotEmpty(),
+                ) {
+                    Text(stringResource(R.string.action_confirm))
+                }
+            }
         }
     }
 }
@@ -170,18 +213,35 @@ fun ExportValidationDialog(
 }
 
 @Composable
-fun MessageDialog(title: String?, message: String?, onDismiss: () -> Unit) {
+fun MessageDialog(
+    title: String?,
+    message: String?,
+    canUndo: Boolean = false,
+    onUndo: () -> Unit = {},
+    onDismiss: () -> Unit,
+) {
     OverlayDialog(
         show = message != null,
         title = title ?: stringResource(R.string.dialog_notice),
         summary = message,
         onDismissRequest = onDismiss,
     ) {
-        Button(
-            modifier = Modifier.fillMaxWidth(),
-            onClick = onDismiss,
-        ) {
-            Text(stringResource(R.string.action_confirm))
+        if (canUndo) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Button(modifier = Modifier.weight(1f), onClick = onDismiss) {
+                    Text(stringResource(R.string.action_confirm))
+                }
+                Button(modifier = Modifier.weight(1f), onClick = onUndo) {
+                    Text(stringResource(R.string.action_undo))
+                }
+            }
+        } else {
+            Button(
+                modifier = Modifier.fillMaxWidth(),
+                onClick = onDismiss,
+            ) {
+                Text(stringResource(R.string.action_confirm))
+            }
         }
     }
 }

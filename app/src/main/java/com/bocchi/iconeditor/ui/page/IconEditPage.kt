@@ -96,6 +96,9 @@ fun IconEditPage(
 ) {
     var visibleSheetPackageName by remember { mutableStateOf<String?>(null) }
     var retainedSheetPackageName by remember { mutableStateOf<String?>(null) }
+    // Re-open after dismiss finishes — mid-animation reopen leaves OverlayBottomSheet stuck closed.
+    var pendingOpenPackageName by remember { mutableStateOf<String?>(null) }
+    var pendingOpenNew by remember { mutableStateOf(false) }
     var editingNew by remember { mutableStateOf(false) }
     var draftPackageName by remember { mutableStateOf("") }
     var draftAppName by remember { mutableStateOf("") }
@@ -170,21 +173,55 @@ fun IconEditPage(
         draftAdditions = emptyList()
     }
 
-    fun openSheet(packageName: String) {
+    fun openSheetNow(packageName: String) {
         val item = items.firstOrNull { it.packageName == packageName } ?: return
         resetDraftFields(item, isNew = false)
         retainedSheetPackageName = packageName
         visibleSheetPackageName = packageName
     }
 
-    fun openNewSheet() {
+    fun openNewSheetNow() {
         resetDraftFields(null, isNew = true)
         retainedSheetPackageName = "__new__"
         visibleSheetPackageName = "__new__"
     }
 
+    fun openSheet(packageName: String) {
+        when {
+            visibleSheetPackageName != null -> openSheetNow(packageName)
+            retainedSheetPackageName != null -> {
+                pendingOpenNew = false
+                pendingOpenPackageName = packageName
+            }
+            else -> openSheetNow(packageName)
+        }
+    }
+
+    fun openNewSheet() {
+        when {
+            visibleSheetPackageName != null -> openNewSheetNow()
+            retainedSheetPackageName != null -> {
+                pendingOpenPackageName = null
+                pendingOpenNew = true
+            }
+            else -> openNewSheetNow()
+        }
+    }
+
     fun requestCloseSheet() {
+        pendingOpenPackageName = null
+        pendingOpenNew = false
         visibleSheetPackageName = null
+    }
+
+    fun clearSheetRetention() {
+        retainedSheetPackageName = null
+        editingNew = false
+        draftReplacements = emptyList()
+        draftAdditions = emptyList()
+        draftSelectedAdditionIndex = null
+        draftAliasPackageNames = emptyList()
+        pendingImport = null
     }
 
     LaunchedEffect(addIconRequest) {
@@ -274,14 +311,19 @@ fun IconEditPage(
         },
         onDismissRequest = ::requestCloseSheet,
         onDismissFinished = {
-            if (visibleSheetPackageName == null) {
-                retainedSheetPackageName = null
-                editingNew = false
-                draftReplacements = emptyList()
-                draftAdditions = emptyList()
-                draftSelectedAdditionIndex = null
-                draftAliasPackageNames = emptyList()
-                pendingImport = null
+            if (visibleSheetPackageName != null) return@OverlayBottomSheet
+            clearSheetRetention()
+            when {
+                pendingOpenNew -> {
+                    pendingOpenNew = false
+                    pendingOpenPackageName = null
+                    openNewSheetNow()
+                }
+                pendingOpenPackageName != null -> {
+                    val next = pendingOpenPackageName
+                    pendingOpenPackageName = null
+                    if (next != null) openSheetNow(next)
+                }
             }
         },
     ) {

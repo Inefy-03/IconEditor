@@ -48,6 +48,8 @@ fun SettingsPage(
     contentPadding: PaddingValues = PaddingValues(top = 12.dp, bottom = 12.dp),
     onSettings: (AppSettings) -> Unit,
     onTheme: () -> Unit,
+    onProjectSync: () -> Unit,
+    onTrash: () -> Unit,
     onAbout: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -103,6 +105,15 @@ fun SettingsPage(
                         onClick = { onSettings(settings.copy(exportDirectoryUri = "")) },
                     )
                 }
+                ArrowPreference(
+                    title = stringResource(R.string.screen_project_sync),
+                    onClick = onProjectSync,
+                )
+                ArrowPreference(
+                    title = stringResource(R.string.screen_trash),
+                    summary = stringResource(R.string.trash_settings_summary),
+                    onClick = onTrash,
+                )
                 ArrowPreference(
                     title = stringResource(R.string.about_title),
                     onClick = onAbout,

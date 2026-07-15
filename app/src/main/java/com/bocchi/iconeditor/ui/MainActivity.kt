@@ -1,5 +1,6 @@
 package com.bocchi.iconeditor.ui
 
+import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -67,6 +68,7 @@ import com.bocchi.iconeditor.ui.component.MainBottomBar
 import com.bocchi.iconeditor.ui.component.MainNavigationRail
 import com.bocchi.iconeditor.ui.component.MaskLayerImportConfirmDialog
 import com.bocchi.iconeditor.ui.component.MessageDialog
+import com.bocchi.iconeditor.ui.component.RenameProjectDialog
 import com.bocchi.iconeditor.ui.component.RootPagerContent
 import com.bocchi.iconeditor.ui.component.Screen
 import com.bocchi.iconeditor.ui.component.appPageBackground
@@ -81,6 +83,9 @@ import com.bocchi.iconeditor.ui.locale.ensureInitialAppLanguage
 import com.bocchi.iconeditor.ui.page.AboutPage
 import com.bocchi.iconeditor.ui.page.IconEditPage
 import com.bocchi.iconeditor.ui.page.InfoEditPage
+import com.bocchi.iconeditor.ui.page.ProjectSyncDiffDialog
+import com.bocchi.iconeditor.ui.page.ProjectSyncPage
+import com.bocchi.iconeditor.ui.page.TrashPage
 import com.bocchi.iconeditor.ui.page.ProjectsPage
 import com.bocchi.iconeditor.ui.page.SettingsPage
 import com.bocchi.iconeditor.ui.page.ThemeSettingsPage
@@ -182,6 +187,7 @@ private fun IconEditorApp(
     onIncomingProjectHandled: () -> Unit,
 ) {
     var deleteProject by remember { mutableStateOf<ProjectSummary?>(null) }
+    var renameProject by remember { mutableStateOf<ProjectSummary?>(null) }
     var exportProject by remember { mutableStateOf<ProjectSummary?>(null) }
     var exportPickerProject by remember { mutableStateOf<ProjectSummary?>(null) }
     var incompleteExport by remember { mutableStateOf<Pair<ProjectSummary, ExportFormat>?>(null) }
@@ -262,6 +268,19 @@ private fun IconEditorApp(
                 )
             }
             viewModel.previewMaskLayersFromPack(it)
+        }
+    }
+    val syncQrScanner = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        if (result.resultCode != Activity.RESULT_OK) return@rememberLauncherForActivityResult
+        val raw = result.data?.getStringExtra(SyncQrScanActivity.EXTRA_RAW_VALUE).orEmpty()
+        if (!viewModel.applySyncConnectionPayload(raw)) {
+            Toast.makeText(
+                context,
+                context.getString(R.string.sync_scan_invalid),
+                Toast.LENGTH_SHORT,
+            ).show()
         }
     }
     val mtzExportLauncher = rememberLauncherForActivityResult(
@@ -390,6 +409,14 @@ private fun IconEditorApp(
                                                 viewModel.loadProject(it.id, loadIcons = true)
                                                 navigateTo(Screen.Icons)
                                             },
+                                            onSync = {
+                                                if (!viewModel.hasSyncPeerConfigured()) {
+                                                    navigateTo(Screen.ProjectSync)
+                                                } else {
+                                                    viewModel.syncProject(it.id)
+                                                }
+                                            },
+                                            onRename = { renameProject = it },
                                             onDelete = { deleteProject = it },
                                             onExport = { exportProject = it },
                                         )
@@ -400,6 +427,11 @@ private fun IconEditorApp(
                                             contentPadding = contentPadding.withPageMargins(horizontal = 0.dp),
                                             onSettings = viewModel::updateSettings,
                                             onTheme = { navigateTo(Screen.ThemeSettings) },
+                                            onProjectSync = { navigateTo(Screen.ProjectSync) },
+                                            onTrash = {
+                                                viewModel.refreshTrash()
+                                                navigateTo(Screen.Trash)
+                                            },
                                             onAbout = { navigateTo(Screen.About) },
                                         )
                                     },
@@ -521,6 +553,56 @@ private fun IconEditorApp(
                                     )
                                 }
                                 Screen.About -> AboutPage(onBack = ::navigateBack)
+                                Screen.ProjectSync -> SecondaryScene(
+                                    screen = Screen.ProjectSync,
+                                    pageBackground = pageBackground,
+                                    scrollBehavior = scrollBehavior,
+                                    blurEnabled = viewModel.settings.blurEnabled,
+                                    iconPreferences = viewModel.iconPreferences,
+                                    onIconPreferences = ::onIconPreferencesChanged,
+                                    onBack = ::navigateBack,
+                                    onCreateProject = viewModel::createProject,
+                                ) { contentPadding ->
+                                    ProjectSyncPage(
+                                        contentPadding = contentPadding.withPageMargins(horizontal = 0.dp),
+                                        serverRunning = viewModel.syncServerRunning,
+                                        serverPort = viewModel.syncServerPort,
+                                        serverToken = viewModel.syncServerToken,
+                                        lanAddress = viewModel.syncLanAddress,
+                                        peerHost = viewModel.syncPeerHost,
+                                        peerPort = viewModel.syncPeerPort,
+                                        peerToken = viewModel.syncPeerToken,
+                                        statusMessage = viewModel.syncStatusMessage,
+                                        onPeerHost = { viewModel.syncPeerHost = it },
+                                        onPeerPort = { viewModel.syncPeerPort = it },
+                                        onPeerToken = { viewModel.syncPeerToken = it },
+                                        onSavePeer = viewModel::persistSyncPeerSettings,
+                                        onScanQr = {
+                                            syncQrScanner.launch(Intent(context, SyncQrScanActivity::class.java))
+                                        },
+                                        onStartServer = viewModel::startSyncServer,
+                                        onStopServer = viewModel::stopSyncServer,
+                                        onProbe = viewModel::probeSyncPeer,
+                                    )
+                                }
+                                Screen.Trash -> SecondaryScene(
+                                    screen = Screen.Trash,
+                                    pageBackground = pageBackground,
+                                    scrollBehavior = scrollBehavior,
+                                    blurEnabled = viewModel.settings.blurEnabled,
+                                    iconPreferences = viewModel.iconPreferences,
+                                    onIconPreferences = ::onIconPreferencesChanged,
+                                    onBack = ::navigateBack,
+                                    onCreateProject = viewModel::createProject,
+                                ) { contentPadding ->
+                                    TrashPage(
+                                        entries = viewModel.trashEntries,
+                                        contentPadding = contentPadding.withPageMargins(horizontal = 0.dp),
+                                        onRestore = viewModel::restoreTrashProject,
+                                        onPurge = viewModel::purgeTrashProject,
+                                        onEmpty = viewModel::emptyTrash,
+                                    )
+                                }
                                 else -> error("Unknown navigation destination: $targetScreen")
                             }
                         }
@@ -534,6 +616,15 @@ private fun IconEditorApp(
                     onConfirm = {
                         viewModel.deleteProject(it.id)
                         deleteProject = null
+                    },
+                )
+                RenameProjectDialog(
+                    project = renameProject,
+                    metadata = renameProject?.let { viewModel.projectMetadata[it.id] },
+                    onDismiss = { renameProject = null },
+                    onConfirm = { project, name ->
+                        viewModel.renameProject(project.id, name)
+                        renameProject = null
                     },
                 )
                 ExportDialog(
@@ -598,7 +689,14 @@ private fun IconEditorApp(
                 MessageDialog(
                     title = viewModel.message?.title,
                     message = viewModel.message?.summary,
-                    onDismiss = viewModel::clearMessage,
+                    canUndo = viewModel.message?.canUndo == true,
+                    onUndo = viewModel::undoLastIconChange,
+                    onDismiss = {
+                        if (viewModel.message?.canUndo == true) {
+                            viewModel.dismissIconUndo()
+                        }
+                        viewModel.clearMessage()
+                    },
                 )
                 IconImportConfirmDialog(
                     preview = viewModel.iconImportPreview,
@@ -618,6 +716,22 @@ private fun IconEditorApp(
                     onSelectNone = { viewModel.setAllMaskLayerImportSelection(false) },
                     onDismiss = viewModel::dismissMaskLayerImportPreview,
                     onImport = viewModel::applyMaskLayerImport,
+                )
+                ProjectSyncDiffDialog(
+                    preview = viewModel.syncDiffPreview,
+                    busy = viewModel.syncBusy,
+                    applyFraction = viewModel.syncApplyFraction,
+                    applyTotal = viewModel.syncApplyTotal,
+                    applyStatus = viewModel.syncStatusMessage,
+                    onToggle = viewModel::toggleSyncDiffItem,
+                    onAction = viewModel::setSyncDiffAction,
+                    onSelectPushLocal = viewModel::selectSyncDiffPushLocalOnly,
+                    onSelectDeleteLocal = viewModel::selectSyncDiffDeleteLocalOnly,
+                    onSelectPullRemote = viewModel::selectSyncDiffPullRemoteOnly,
+                    onSelectDeleteRemote = viewModel::selectSyncDiffDeleteRemoteOnly,
+                    onSelectNone = viewModel::selectSyncDiffNone,
+                    onDismiss = viewModel::dismissSyncDiff,
+                    onApply = viewModel::applySyncDiff,
                 )
                 ImportProgressOverlay(progress = viewModel.importProgress)
                 ExportProgressOverlay(

@@ -99,6 +99,8 @@ enum class Screen : NavKey {
     Icons,
     ThemeSettings,
     About,
+    ProjectSync,
+    Trash,
 }
 
 @Composable
@@ -243,6 +245,8 @@ fun AppTopBar(
         Screen.Icons -> stringResource(R.string.screen_icon_edit)
         Screen.ThemeSettings -> stringResource(R.string.screen_theme_settings)
         Screen.About -> stringResource(R.string.about_title)
+        Screen.ProjectSync -> stringResource(R.string.screen_project_sync)
+        Screen.Trash -> stringResource(R.string.screen_trash)
     }
     if (screen == Screen.About) return
     TopAppBar(

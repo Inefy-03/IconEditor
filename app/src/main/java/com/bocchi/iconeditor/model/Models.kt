@@ -8,7 +8,11 @@ import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
 import kotlinx.serialization.descriptors.SerialDescriptor
 import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
+import kotlinx.serialization.json.JsonDecoder
 import kotlinx.serialization.json.JsonNames
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.longOrNull
 
 @Serializable(with = SourceTypeSerializer::class)
 enum class SourceType { Universal, Mtz, Module, Apk }
@@ -83,13 +87,33 @@ data class ExportProgress(
         }
 }
 
+/** Accepts integer or floating epoch millis (Mac may historically emit Doubles). */
+object EpochMillisSerializer : KSerializer<Long> {
+    override val descriptor: SerialDescriptor =
+        PrimitiveSerialDescriptor("EpochMillis", PrimitiveKind.LONG)
+
+    override fun serialize(encoder: Encoder, value: Long) = encoder.encodeLong(value)
+
+    override fun deserialize(decoder: Decoder): Long {
+        val json = decoder as? JsonDecoder
+            ?: return decoder.decodeLong()
+        val primitive = json.decodeJsonElement() as? JsonPrimitive
+            ?: error("Expected JSON number for epoch millis")
+        return primitive.longOrNull
+            ?: primitive.doubleOrNull?.toLong()
+            ?: error("Invalid epoch millis: ${primitive.content}")
+    }
+}
+
 @Serializable
 data class ProjectSummary(
     val id: String,
     val name: String,
     val sourceType: SourceType = SourceType.Universal,
     val sourceFileName: String = "",
+    @Serializable(with = EpochMillisSerializer::class)
     val createdAt: Long = System.currentTimeMillis(),
+    @Serializable(with = EpochMillisSerializer::class)
     val updatedAt: Long = System.currentTimeMillis(),
     val dirty: Boolean = false,
 )
@@ -215,6 +239,9 @@ data class AppSettings(
     val predictiveBackEnabled: Boolean = false,
     val projectSortField: ProjectSortField = ProjectSortField.CreatedAt,
     val exportDirectoryUri: String = "",
+    val syncPeerHost: String = "",
+    val syncPeerPort: String = "18765",
+    val syncPeerToken: String = "",
 )
 
 @Serializable
@@ -248,4 +275,27 @@ data class IconListItem(
 @Serializable
 data class ProjectIndex(
     val projects: List<ProjectSummary> = emptyList(),
+)
+
+@Serializable
+data class TrashEntry(
+    val project: ProjectSummary,
+    @Serializable(with = EpochMillisSerializer::class)
+    val deletedAt: Long = System.currentTimeMillis(),
+)
+
+@Serializable
+data class TrashIndex(
+    val entries: List<TrashEntry> = emptyList(),
+)
+
+@Serializable
+data class IconUndoMeta(
+    val projectId: String = "",
+    val packageName: String = "",
+    val label: String = "",
+    val selectedVariant: String? = null,
+    val customAppName: String? = null,
+    val mappingEntry: IconMappingEntry? = null,
+    val archivePaths: List<String> = emptyList(),
 )

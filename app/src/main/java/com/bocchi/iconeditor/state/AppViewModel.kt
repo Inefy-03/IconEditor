@@ -17,6 +17,17 @@ import com.bocchi.iconeditor.data.InvalidProjectArchiveException
 import com.bocchi.iconeditor.data.NoMaskLayersFoundException
 import com.bocchi.iconeditor.data.ProjectRepository
 import com.bocchi.iconeditor.data.packagename.PackageNameRepository
+import com.bocchi.iconeditor.data.sync.ProjectSyncAction
+import com.bocchi.iconeditor.data.sync.ProjectSyncClient
+import com.bocchi.iconeditor.data.sync.ProjectSyncConnectionParser
+import com.bocchi.iconeditor.data.sync.ProjectSyncConstants
+import com.bocchi.iconeditor.data.sync.ProjectSyncDiffer
+import com.bocchi.iconeditor.data.sync.ProjectSyncDiffPreview
+import com.bocchi.iconeditor.data.sync.ProjectSyncHttpServer
+import com.bocchi.iconeditor.data.sync.ProjectSyncKind
+import com.bocchi.iconeditor.data.sync.ProjectSyncOrchestrator
+import com.bocchi.iconeditor.data.sync.ProjectSyncPeerAnnounce
+import com.bocchi.iconeditor.data.sync.ProjectSyncRouteHandler
 import com.bocchi.iconeditor.model.ApkInfo
 import com.bocchi.iconeditor.model.AppSettings
 import com.bocchi.iconeditor.model.ExportFormat
@@ -45,7 +56,17 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-data class AppMessage(val title: String, val summary: String)
+data class AppMessage(
+    val title: String,
+    val summary: String,
+    val canUndo: Boolean = false,
+)
+
+data class IconUndoOffer(
+    val token: String,
+    val label: String,
+    val alsoRemovePackages: List<String> = emptyList(),
+)
 
 class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = ProjectRepository(application)
@@ -72,6 +93,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         private set
     var message by mutableStateOf<AppMessage?>(null)
         private set
+    var iconUndoOffer by mutableStateOf<IconUndoOffer?>(null)
+        private set
+    var trashEntries by mutableStateOf<List<com.bocchi.iconeditor.model.TrashEntry>>(emptyList())
+        private set
     var isProjectLoading by mutableStateOf(false)
         private set
     var isImporting by mutableStateOf(false)
@@ -94,6 +119,34 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         private set
     var apkAssetsRevision by mutableIntStateOf(0)
         private set
+
+    // Project LAN sync
+    var syncServerRunning by mutableStateOf(false)
+        private set
+    var syncServerPort by mutableIntStateOf(ProjectSyncConstants.DEFAULT_PORT)
+        private set
+    var syncServerToken by mutableStateOf("")
+        private set
+    var syncLanAddress by mutableStateOf<String?>(null)
+        private set
+    var syncPeerHost by mutableStateOf(settings.syncPeerHost)
+    var syncPeerPort by mutableStateOf(
+        settings.syncPeerPort.ifBlank { ProjectSyncConstants.DEFAULT_PORT.toString() },
+    )
+    var syncPeerToken by mutableStateOf(settings.syncPeerToken)
+    var syncStatusMessage by mutableStateOf<String?>(null)
+        private set
+    var syncBusy by mutableStateOf(false)
+        private set
+    var syncApplyDone by mutableIntStateOf(0)
+        private set
+    var syncApplyTotal by mutableIntStateOf(0)
+        private set
+    val syncApplyFraction: Float
+        get() = if (syncApplyTotal <= 0) 0f else (syncApplyDone.toFloat() / syncApplyTotal).coerceIn(0f, 1f)
+    var syncDiffPreview by mutableStateOf<ProjectSyncDiffPreview?>(null)
+        private set
+    private var syncHttpServer: ProjectSyncHttpServer? = null
 
     private val initializationJob: Job
 
@@ -123,11 +176,55 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         projects = repository.loadProjects()
         projectMetadata = projects.associate { it.id to repository.loadMetadata(it.id) }
         settings = repository.loadSettings()
+        trashEntries = repository.loadTrash()
         selectedProjectId?.let { loadProject(it, loadIcons = false) }
     }
 
     fun clearMessage() {
         message = null
+    }
+
+    fun dismissIconUndo() {
+        iconUndoOffer = null
+        repository.clearIconUndoSnapshots()
+    }
+
+    fun undoLastIconChange() = runAction {
+        val offer = iconUndoOffer ?: return@runAction
+        repository.restoreIconUndoSnapshot(offer.token, offer.alsoRemovePackages)
+        iconUndoOffer = null
+        message = null
+        selectedProjectId?.let {
+            iconPreferences = repository.loadIconPreferences(it)
+            icons = repository.loadIcons(it)
+        }
+        refresh()
+        showMessage(R.string.dialog_notice, getApplication<Application>().getString(R.string.undo_done))
+    }
+
+    fun refreshTrash() {
+        trashEntries = repository.loadTrash()
+    }
+
+    fun restoreTrashProject(id: String) = runAction {
+        repository.restoreProjectFromTrash(id)
+        refresh()
+        showMessage(R.string.dialog_notice, getApplication<Application>().getString(R.string.trash_restored))
+    }
+
+    fun purgeTrashProject(id: String) = runAction {
+        repository.purgeTrashProject(id)
+        refreshTrash()
+    }
+
+    fun emptyTrash() = runAction {
+        repository.emptyTrash()
+        refreshTrash()
+    }
+
+    override fun onCleared() {
+        stopSyncServer()
+        super.onCleared()
     }
 
     fun notifyInstalledAppsPermissionDenied() {
@@ -482,6 +579,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         repository.deleteProject(id)
         if (selectedProjectId == id) selectedProjectId = null
         refresh()
+        showMessage(R.string.dialog_notice, getApplication<Application>().getString(R.string.trash_moved))
     }
 
     fun renameProject(id: String, name: String) = runAction {
@@ -679,6 +777,16 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 if (existingPackages.contains(trimmedPackage)) {
                     error(getApplication<Application>().getString(R.string.icon_edit_package_exists, trimmedPackage))
                 }
+            }
+
+            val snapshotPackage = if (isNew) trimmedPackage else original.ifBlank { trimmedPackage }
+            val undoToken = repository.beginIconUndoSnapshot(
+                projectId,
+                snapshotPackage,
+                trimmedAppName.ifBlank { snapshotPackage },
+            )
+
+            if (!isNew && original.isNotEmpty() && original != trimmedPackage) {
                 replacements.forEach { (asset, uri) ->
                     repository.replaceIcon(projectId, asset, uri)
                 }
@@ -757,13 +865,26 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             repository.updateIconAliasPackageNames(projectId, trimmedPackage, aliases)
             icons = repository.loadIcons(projectId)
             refresh()
-            showMessage(
-                R.string.dialog_notice,
-                if (isNew) {
+            val alsoRemove = if (!isNew && original.isNotEmpty() && original != trimmedPackage) {
+                listOf(trimmedPackage)
+            } else if (isNew) {
+                listOf(trimmedPackage)
+            } else {
+                emptyList()
+            }
+            iconUndoOffer = IconUndoOffer(
+                token = undoToken,
+                label = trimmedAppName,
+                alsoRemovePackages = alsoRemove,
+            )
+            message = AppMessage(
+                title = getApplication<Application>().getString(R.string.dialog_notice),
+                summary = if (isNew) {
                     getApplication<Application>().getString(R.string.icon_edit_added, trimmedAppName)
                 } else {
                     getApplication<Application>().getString(R.string.icon_edit_updated, trimmedAppName)
                 },
+                canUndo = true,
             )
             true
         } catch (error: Throwable) {
@@ -782,6 +903,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun deleteIcon(asset: IconAsset) = runAction {
         selectedProjectId?.let {
+            val undoToken = repository.beginIconUndoSnapshot(
+                it,
+                asset.packageName,
+                asset.packageName,
+            )
             repository.deleteIcon(it, asset)
             if (iconPreferences.selectedVariants[asset.packageName] == asset.variantKey) {
                 iconPreferences = iconPreferences.copy(selectedVariants = iconPreferences.selectedVariants - asset.packageName)
@@ -789,6 +915,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
             icons = repository.loadIcons(it)
             refresh()
+            iconUndoOffer = IconUndoOffer(token = undoToken, label = asset.packageName)
+            message = AppMessage(
+                title = getApplication<Application>().getString(R.string.dialog_notice),
+                summary = getApplication<Application>().getString(R.string.icon_deleted_undoable),
+                canUndo = true,
+            )
         }
     }
 
@@ -880,7 +1012,32 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun updateSettings(settings: AppSettings) = runAction {
         this.settings = settings
+        syncPeerHost = settings.syncPeerHost
+        syncPeerPort = settings.syncPeerPort.ifBlank { ProjectSyncConstants.DEFAULT_PORT.toString() }
+        syncPeerToken = settings.syncPeerToken
         repository.saveSettings(settings)
+    }
+
+    fun persistSyncPeerSettings() {
+        updateSettings(
+            settings.copy(
+                syncPeerHost = syncPeerHost.trim(),
+                syncPeerPort = syncPeerPort.trim().ifBlank { ProjectSyncConstants.DEFAULT_PORT.toString() },
+                syncPeerToken = syncPeerToken.trim(),
+            ),
+        )
+        if (hasSyncPeerConfigured()) {
+            ensureLocalServerAndRegisterWithPeer()
+        }
+    }
+
+    fun hasSyncPeerConfigured(): Boolean =
+        syncPeerHost.isNotBlank() && syncPeerToken.isNotBlank()
+
+    fun syncProject(projectId: String) {
+        if (!hasSyncPeerConfigured()) return
+        loadProject(projectId, loadIcons = false)
+        buildSyncDiffFromPeer()
     }
 
     fun iconFile(asset: IconAsset) = selectedProjectId?.let { repository.iconFile(it, asset) }
@@ -974,6 +1131,386 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private fun variantOrder(variantKey: String, packageName: String): Int {
         if (variantKey == packageName) return 0
         return variantKey.removePrefix("${packageName}_").toIntOrNull() ?: Int.MAX_VALUE
+    }
+
+    // MARK: Project LAN sync
+
+    fun startSyncServer() {
+        stopSyncServer()
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                val token = java.util.UUID.randomUUID().toString().replace("-", "")
+                val handler = ProjectSyncRouteHandler(
+                    repository = repository,
+                    resolveAppName = { packageNameRepository.resolveAppName(it, null) },
+                    cacheDir = getApplication<Application>().cacheDir,
+                    onPeerPaired = { announce ->
+                        viewModelScope.launch(Dispatchers.Main) {
+                            applyIncomingPeerAnnounce(announce)
+                        }
+                    },
+                    onProjectEnsured = {
+                        viewModelScope.launch(Dispatchers.Main) {
+                            projects = repository.loadProjects()
+                        }
+                    },
+                )
+                val server = ProjectSyncHttpServer(
+                    port = ProjectSyncConstants.DEFAULT_PORT,
+                    token = token,
+                    handler = handler::handle,
+                )
+                server.start()
+                syncHttpServer = server
+                withContext(Dispatchers.Main) {
+                    syncServerRunning = true
+                    syncServerPort = ProjectSyncConstants.DEFAULT_PORT
+                    syncServerToken = token
+                    syncLanAddress = ProjectSyncOrchestrator.preferredLanAddress()
+                    syncStatusMessage = getApplication<Application>().getString(
+                        R.string.sync_server_running,
+                        syncLanAddress ?: "0.0.0.0",
+                        syncServerPort,
+                    )
+                }
+                if (hasSyncPeerConfigured()) {
+                    registerSelfWithConfiguredPeer()
+                }
+            }.onFailure { error ->
+                withContext(Dispatchers.Main) { showError(error) }
+            }
+        }
+    }
+
+    fun applyIncomingPeerAnnounce(announce: ProjectSyncPeerAnnounce) {
+        syncPeerHost = announce.host.trim()
+        syncPeerPort = announce.port.toString()
+        syncPeerToken = announce.token.trim()
+        updateSettings(
+            settings.copy(
+                syncPeerHost = syncPeerHost,
+                syncPeerPort = syncPeerPort.ifBlank { ProjectSyncConstants.DEFAULT_PORT.toString() },
+                syncPeerToken = syncPeerToken,
+            ),
+        )
+        syncStatusMessage = getApplication<Application>().getString(R.string.sync_mutual_paired)
+    }
+
+    private fun registerSelfWithConfiguredPeer() {
+        viewModelScope.launch {
+            val host = syncLanAddress
+                ?: withContext(Dispatchers.IO) { ProjectSyncOrchestrator.preferredLanAddress() }
+            if (!syncServerRunning || host.isNullOrBlank() || syncServerToken.isBlank()) return@launch
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    makeSyncClient().registerPeer(
+                        ProjectSyncPeerAnnounce(
+                            host = host,
+                            port = syncServerPort,
+                            token = syncServerToken,
+                        ),
+                    )
+                }
+                syncStatusMessage = getApplication<Application>().getString(R.string.sync_mutual_paired)
+            }
+        }
+    }
+
+    /**
+     * Ensure this device is hosting so the remote can dial back, then announce ourselves to the peer.
+     */
+    fun ensureLocalServerAndRegisterWithPeer() {
+        viewModelScope.launch {
+            syncBusy = true
+            try {
+                if (!syncServerRunning) {
+                    val started = withContext(Dispatchers.IO) {
+                        runCatching {
+                            val token = java.util.UUID.randomUUID().toString().replace("-", "")
+                            val handler = ProjectSyncRouteHandler(
+                                repository = repository,
+                                resolveAppName = { packageNameRepository.resolveAppName(it, null) },
+                                cacheDir = getApplication<Application>().cacheDir,
+                                onPeerPaired = { announce ->
+                                    viewModelScope.launch(Dispatchers.Main) {
+                                        applyIncomingPeerAnnounce(announce)
+                                    }
+                                },
+                                onProjectEnsured = {
+                                    viewModelScope.launch(Dispatchers.Main) {
+                                        projects = repository.loadProjects()
+                                    }
+                                },
+                            )
+                            stopSyncServer()
+                            val server = ProjectSyncHttpServer(
+                                port = ProjectSyncConstants.DEFAULT_PORT,
+                                token = token,
+                                handler = handler::handle,
+                            )
+                            server.start()
+                            syncHttpServer = server
+                            Triple(token, ProjectSyncConstants.DEFAULT_PORT, ProjectSyncOrchestrator.preferredLanAddress())
+                        }.getOrElse { throw it }
+                    }
+                    syncServerRunning = true
+                    syncServerToken = started.first
+                    syncServerPort = started.second
+                    syncLanAddress = started.third
+                }
+                val host = syncLanAddress
+                    ?: withContext(Dispatchers.IO) { ProjectSyncOrchestrator.preferredLanAddress() }
+                    ?: error(getApplication<Application>().getString(R.string.sync_no_lan_address))
+                withContext(Dispatchers.IO) {
+                    makeSyncClient().registerPeer(
+                        ProjectSyncPeerAnnounce(
+                            host = host,
+                            port = syncServerPort,
+                            token = syncServerToken,
+                        ),
+                    )
+                }
+                syncStatusMessage = getApplication<Application>().getString(R.string.sync_mutual_paired)
+            } catch (error: Throwable) {
+                if (error is CancellationException) throw error
+                showError(error)
+            } finally {
+                syncBusy = false
+            }
+        }
+    }
+
+    fun applySyncConnectionPayload(raw: String): Boolean {
+        val parsed = ProjectSyncConnectionParser.parse(raw) ?: return false
+        syncPeerHost = parsed.host
+        syncPeerPort = parsed.port.toString()
+        syncPeerToken = parsed.token
+        updateSettings(
+            settings.copy(
+                syncPeerHost = syncPeerHost.trim(),
+                syncPeerPort = syncPeerPort.trim().ifBlank { ProjectSyncConstants.DEFAULT_PORT.toString() },
+                syncPeerToken = syncPeerToken.trim(),
+            ),
+        )
+        syncStatusMessage = getApplication<Application>().getString(R.string.sync_scan_filled)
+        ensureLocalServerAndRegisterWithPeer()
+        return true
+    }
+
+    fun stopSyncServer() {
+        syncHttpServer?.stop()
+        syncHttpServer = null
+        syncServerRunning = false
+        syncStatusMessage = null
+    }
+
+    private fun makeSyncClient(): ProjectSyncClient {
+        val host = syncPeerHost.trim()
+        val token = syncPeerToken.trim()
+        val port = syncPeerPort.trim().toIntOrNull() ?: ProjectSyncConstants.DEFAULT_PORT
+        require(host.isNotBlank() && token.isNotBlank()) { "请填写对方主机、端口与令牌" }
+        return ProjectSyncClient("http://$host:$port", token)
+    }
+
+    fun probeSyncPeer() {
+        viewModelScope.launch {
+            syncBusy = true
+            try {
+                val ok = withContext(Dispatchers.IO) { makeSyncClient().health() }
+                syncStatusMessage = getApplication<Application>().getString(
+                    if (ok) R.string.sync_status_ok else R.string.sync_status_fail,
+                )
+            } catch (error: Throwable) {
+                if (error is CancellationException) throw error
+                showError(error)
+            } finally {
+                syncBusy = false
+            }
+        }
+    }
+
+    fun buildSyncDiffFromPeer() {
+        val id = selectedProjectId
+        if (id == null) {
+            showMessage(R.string.dialog_notice, getApplication<Application>().getString(R.string.sync_need_project))
+            return
+        }
+        viewModelScope.launch {
+            syncBusy = true
+            try {
+                val preview = withContext(Dispatchers.IO) {
+                    val client = makeSyncClient()
+                    val remoteProjects = client.listProjects()
+                    if (remoteProjects.none { it.id == id }) {
+                        withContext(Dispatchers.Main) {
+                            syncStatusMessage = getApplication<Application>()
+                                .getString(R.string.sync_creating_remote_project)
+                        }
+                        val localProject = repository.loadProjects().firstOrNull { it.id == id }
+                            ?: error(getApplication<Application>().getString(R.string.sync_need_project))
+                        client.ensureProject(localProject)
+                    }
+                    val local = repository.buildSyncInventory(id) { packageNameRepository.resolveAppName(it, null) }
+                    val remote = client.inventory(id)
+                    ProjectSyncDiffer.diff(local, remote)
+                }
+                syncDiffPreview = preview
+                syncStatusMessage = if (preview.items.isEmpty()) {
+                    getApplication<Application>().getString(R.string.sync_status_aligned)
+                } else {
+                    null
+                }
+            } catch (error: Throwable) {
+                if (error is CancellationException) throw error
+                showError(error)
+            } finally {
+                syncBusy = false
+            }
+        }
+    }
+
+    fun toggleSyncDiffItem(index: Int) {
+        val preview = syncDiffPreview ?: return
+        val items = preview.items.toMutableList()
+        if (index !in items.indices) return
+        val item = items[index]
+        items[index] = item.copy(selected = !item.selected)
+        syncDiffPreview = preview.copy(items = items)
+    }
+
+    fun setSyncDiffAction(index: Int, action: ProjectSyncAction) {
+        val preview = syncDiffPreview ?: return
+        val items = preview.items.toMutableList()
+        if (index !in items.indices) return
+        items[index] = items[index].copy(action = action, selected = action != ProjectSyncAction.skip)
+        syncDiffPreview = preview.copy(items = items)
+    }
+
+    fun selectSyncDiffSafe() {
+        val preview = syncDiffPreview ?: return
+        syncDiffPreview = preview.copy(
+            items = preview.items.map { item ->
+                item.copy(
+                    selected = !item.isDeletionChoice &&
+                        item.kind != com.bocchi.iconeditor.data.sync.ProjectSyncKind.bothChanged &&
+                        item.kind != com.bocchi.iconeditor.data.sync.ProjectSyncKind.metadataChanged,
+                )
+            },
+        )
+    }
+
+    fun selectSyncDiffNone() {
+        val preview = syncDiffPreview ?: return
+        syncDiffPreview = preview.copy(items = preview.items.map { it.copy(selected = false) })
+    }
+
+    fun selectSyncDiffPushLocalOnly() {
+        val preview = syncDiffPreview ?: return
+        syncDiffPreview = preview.copy(
+            items = preview.items.map { item ->
+                if (item.kind == ProjectSyncKind.missingOnRemote) {
+                    item.copy(selected = true, action = ProjectSyncAction.pushToRemote)
+                } else {
+                    item
+                }
+            },
+        )
+    }
+
+    fun selectSyncDiffDeleteLocalOnly() {
+        val preview = syncDiffPreview ?: return
+        syncDiffPreview = preview.copy(
+            items = preview.items.map { item ->
+                if (item.kind == ProjectSyncKind.missingOnRemote) {
+                    item.copy(selected = true, action = ProjectSyncAction.deleteLocal)
+                } else {
+                    item
+                }
+            },
+        )
+    }
+
+    fun selectSyncDiffPullRemoteOnly() {
+        val preview = syncDiffPreview ?: return
+        syncDiffPreview = preview.copy(
+            items = preview.items.map { item ->
+                if (item.kind == ProjectSyncKind.missingOnLocal) {
+                    item.copy(selected = true, action = ProjectSyncAction.pullToLocal)
+                } else {
+                    item
+                }
+            },
+        )
+    }
+
+    fun selectSyncDiffDeleteRemoteOnly() {
+        val preview = syncDiffPreview ?: return
+        syncDiffPreview = preview.copy(
+            items = preview.items.map { item ->
+                if (item.kind == ProjectSyncKind.missingOnLocal) {
+                    item.copy(selected = true, action = ProjectSyncAction.deleteRemote)
+                } else {
+                    item
+                }
+            },
+        )
+    }
+
+    fun dismissSyncDiff() {
+        syncDiffPreview = null
+    }
+
+    fun applySyncDiff() {
+        val id = selectedProjectId ?: return
+        val preview = syncDiffPreview ?: return
+        val total = preview.items.count { it.selected && it.action != ProjectSyncAction.skip }
+        viewModelScope.launch {
+            syncBusy = true
+            syncApplyDone = 0
+            syncApplyTotal = total
+            syncStatusMessage = getApplication<Application>().getString(R.string.sync_status_applying)
+            try {
+                withContext(Dispatchers.IO) {
+                    ProjectSyncOrchestrator.applySelected(
+                        preview = preview,
+                        client = makeSyncClient(),
+                        repository = repository,
+                        projectId = id,
+                        cacheDir = getApplication<Application>().cacheDir,
+                    ) { done, totalCount, label ->
+                        viewModelScope.launch(Dispatchers.Main.immediate) {
+                            syncApplyDone = done
+                            syncApplyTotal = totalCount
+                            syncStatusMessage = if (label.isBlank()) {
+                                getApplication<Application>().getString(
+                                    R.string.sync_status_progress,
+                                    done,
+                                    totalCount,
+                                )
+                            } else {
+                                getApplication<Application>().getString(
+                                    R.string.sync_status_progress_labeled,
+                                    done,
+                                    totalCount,
+                                    label,
+                                )
+                            }
+                        }
+                    }
+                }
+                refresh()
+                selectedProjectId?.let { loadProject(it, loadIcons = true) }
+                syncDiffPreview = null
+                syncStatusMessage = getApplication<Application>().getString(R.string.sync_status_done)
+            } catch (error: Throwable) {
+                if (error is CancellationException) throw error
+                showError(error)
+            } finally {
+                syncBusy = false
+                syncApplyDone = 0
+                syncApplyTotal = 0
+            }
+        }
     }
 
     private fun runAction(block: () -> Unit) {
