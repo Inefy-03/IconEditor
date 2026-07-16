@@ -71,7 +71,6 @@ object ProjectSyncPackager {
         val entries = if (ProjectSyncBundle.isBundle(data)) {
             ProjectSyncBundle.decode(data)
                 .filter { it.second.isNotEmpty() }
-                .sortedBy { it.first }
         } else {
             // Legacy zip from older peers.
             val staged = mutableListOf<Pair<String, ByteArray>>()
@@ -87,13 +86,49 @@ object ProjectSyncPackager {
                     entry = zis.nextEntry
                 }
             }
-            staged.sortedBy { it.first }
+            staged
         }
-        entries.forEachIndexed { index, (name, bytes) ->
-            val ext = name.substringAfterLast('.', "png").ifBlank { "png" }
-            val suffix = if (index == 0) "" else "_$index"
-            File(iconRoot, "$packageName$suffix.$ext").writeBytes(bytes)
+        // 保留原始文件名，避免 _2 被改成 _1 导致两端指纹永远对不上。
+        for ((name, bytes) in entries) {
+            val safeName = File(name).name
+            if (safeName.isBlank() || safeName == "." || safeName == "..") continue
+            File(iconRoot, safeName).writeBytes(bytes)
         }
+    }
+
+    /** Pick the primary variant image bytes from a sync icon package (bundle or legacy zip). */
+    fun primaryImageFromPackage(data: ByteArray, packageName: String): ByteArray? {
+        val entries = if (ProjectSyncBundle.isBundle(data)) {
+            ProjectSyncBundle.decode(data).filter { it.second.isNotEmpty() }
+        } else {
+            val staged = mutableListOf<Pair<String, ByteArray>>()
+            ZipInputStream(BufferedInputStream(java.io.ByteArrayInputStream(data))).use { zis ->
+                var entry = zis.nextEntry
+                while (entry != null) {
+                    if (!entry.isDirectory) {
+                        val name = entry.name.substringAfterLast('/')
+                        val ext = name.substringAfterLast('.', "").lowercase()
+                        if (ext in imageExt) staged += name to zis.readBytes()
+                    }
+                    zis.closeEntry()
+                    entry = zis.nextEntry
+                }
+            }
+            staged
+        }
+        if (entries.isEmpty()) return null
+        val primary = entries.firstOrNull { (name, _) ->
+            File(name).nameWithoutExtension.equals(packageName, ignoreCase = false)
+        } ?: entries.minByOrNull { (name, _) ->
+            val base = File(name).nameWithoutExtension
+            when {
+                base == packageName -> 0
+                base.startsWith("${packageName}_") ->
+                    base.removePrefix("${packageName}_").toIntOrNull() ?: Int.MAX_VALUE
+                else -> Int.MAX_VALUE
+            }
+        }
+        return primary?.second
     }
 
     fun packMeta(projectDir: File, workDir: File, destination: File) {

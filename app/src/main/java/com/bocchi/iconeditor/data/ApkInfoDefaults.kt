@@ -47,6 +47,19 @@ object ApkInfoDefaults {
         )
     }
 
+    /** 每次导出 APK 前递增 versionCode，并同步递增 versionName 末位数字。 */
+    fun bumpVersion(apk: ApkInfo): ApkInfo = apk.copy(
+        versionCode = apk.versionCode.coerceAtLeast(1) + 1,
+        versionName = bumpVersionName(apk.versionName),
+    )
+
+    fun bumpVersionName(versionName: String): String {
+        val base = versionName.trim().ifBlank { "1.0" }
+        val match = Regex("(\\d+)(?!.*\\d)").find(base) ?: return "$base.1"
+        val current = match.value.toLongOrNull() ?: return "$base.1"
+        return base.replaceRange(match.range, (current + 1).toString())
+    }
+
     fun sanitizePackageName(input: String): String {
         val trimmed = input.trim()
         if (isValidPackageName(trimmed)) return trimmed

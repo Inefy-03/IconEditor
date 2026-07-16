@@ -817,6 +817,11 @@ class ProjectRepository(private val context: Context) {
             log = "开始导出 $formatLabel：${project.name}",
         )
         val metadata = resolveExportMetadata(id, format, persist = true)
+        if (format == ExportFormat.Apk) {
+            reporter.log(
+                "版本号已递增：${metadata.apk.versionName} (${metadata.apk.versionCode})",
+            )
+        }
         reporter.log("校验导出信息")
         validateForExport(format, metadata).takeIf { it.isNotEmpty() }?.let {
             error(it.joinToString("\n"))
@@ -943,7 +948,11 @@ class ProjectRepository(private val context: Context) {
         val metadata = loadMetadata(id)
         if (format != ExportFormat.Apk) return metadata
         val project = requireProject(id)
-        val resolvedApk = ApkInfoDefaults.resolve(project.name, metadata)
+        var resolvedApk = ApkInfoDefaults.resolve(project.name, metadata)
+        // 正式导出时自动递增版本号，校验预览不改动。
+        if (persist) {
+            resolvedApk = ApkInfoDefaults.bumpVersion(resolvedApk)
+        }
         if (resolvedApk == metadata.apk) return metadata
         val updated = metadata.copy(apk = resolvedApk)
         if (persist) saveMetadata(id, updated)
@@ -968,6 +977,13 @@ class ProjectRepository(private val context: Context) {
     fun metadataPath(id: String): File = metadataFile(id)
     fun preferencesPath(id: String): File = preferencesFile(id)
     fun iconMappingPath(id: String): File = iconMappingFile(id)
+
+    /** Primary (first) icon file for a package, used by sync preview thumbnails. */
+    fun primaryIconFile(id: String, packageName: String): File? =
+        ArchiveService.listIconFiles(workDir(id), packageName).firstOrNull()
+
+    fun primaryIconBytes(id: String, packageName: String): ByteArray? =
+        primaryIconFile(id, packageName)?.takeIf { it.isFile }?.readBytes()
 
     fun buildSyncInventory(id: String, resolveAppName: (String) -> String): ProjectSyncInventory {
         val project = requireProject(id)

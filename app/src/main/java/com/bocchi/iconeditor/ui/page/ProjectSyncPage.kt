@@ -1,5 +1,6 @@
 package com.bocchi.iconeditor.ui.page
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -18,17 +19,22 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import android.graphics.BitmapFactory
 import com.bocchi.iconeditor.R
 import com.bocchi.iconeditor.data.sync.ProjectSyncAction
 import com.bocchi.iconeditor.data.sync.ProjectSyncDiffItem
 import com.bocchi.iconeditor.data.sync.ProjectSyncDiffPreview
 import com.bocchi.iconeditor.data.sync.ProjectSyncKind
+import java.io.File
 import top.yukonga.miuix.kmp.basic.Button
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.SmallTitle
@@ -173,6 +179,9 @@ fun ProjectSyncDiffDialog(
     applyFraction: Float = 0f,
     applyTotal: Int = 0,
     applyStatus: String? = null,
+    remoteThumbs: Map<String, ByteArray?>,
+    localIconFile: (String) -> File?,
+    onRequestRemoteThumb: (String) -> Unit,
     onToggle: (Int) -> Unit,
     onAction: (Int, ProjectSyncAction) -> Unit,
     onSelectPushLocal: () -> Unit,
@@ -206,7 +215,12 @@ fun ProjectSyncDiffDialog(
                 }
             }
             Text(
-                stringResource(R.string.sync_only_local_hint),
+                stringResource(
+                    R.string.sync_only_local_hint,
+                    current.items.count {
+                        it.kind == ProjectSyncKind.missingOnRemote || it.kind == ProjectSyncKind.localOnly
+                    },
+                ),
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 style = MiuixTheme.textStyles.subtitle,
             )
@@ -219,7 +233,12 @@ fun ProjectSyncDiffDialog(
                 }
             }
             Text(
-                stringResource(R.string.sync_only_remote_hint),
+                stringResource(
+                    R.string.sync_only_remote_hint,
+                    current.items.count {
+                        it.kind == ProjectSyncKind.missingOnLocal || it.kind == ProjectSyncKind.remoteOnly
+                    },
+                ),
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 style = MiuixTheme.textStyles.subtitle,
             )
@@ -248,6 +267,9 @@ fun ProjectSyncDiffDialog(
                 itemsIndexed(current.items, key = { _, item -> item.id }) { index, item ->
                     SyncDiffRow(
                         item = item,
+                        localFile = item.packageName.takeIf { it.isNotBlank() }?.let(localIconFile),
+                        remoteBytes = remoteThumbs[item.packageName],
+                        onRequestRemoteThumb = onRequestRemoteThumb,
                         onToggle = { onToggle(index) },
                         onAction = { onAction(index, it) },
                     )
@@ -293,9 +315,23 @@ private fun SyncApplyProgressBar(fraction: Float) {
 @Composable
 private fun SyncDiffRow(
     item: ProjectSyncDiffItem,
+    localFile: File?,
+    remoteBytes: ByteArray?,
+    onRequestRemoteThumb: (String) -> Unit,
     onToggle: () -> Unit,
     onAction: (ProjectSyncAction) -> Unit,
 ) {
+    val showLocal = item.kind == ProjectSyncKind.missingOnRemote ||
+        item.kind == ProjectSyncKind.localOnly ||
+        item.kind == ProjectSyncKind.bothChanged
+    val showRemote = item.kind == ProjectSyncKind.missingOnLocal ||
+        item.kind == ProjectSyncKind.remoteOnly ||
+        item.kind == ProjectSyncKind.bothChanged
+    if (showRemote && item.packageName.isNotBlank()) {
+        LaunchedEffect(item.packageName) {
+            onRequestRemoteThumb(item.packageName)
+        }
+    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -305,6 +341,16 @@ private fun SyncDiffRow(
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             SyncCheckMark(checked = item.selected)
+            if (item.packageName.isNotBlank() && (showLocal || showRemote)) {
+                SyncDiffIcons(
+                    showLocal = showLocal,
+                    showRemote = showRemote,
+                    bothDifferent = item.kind == ProjectSyncKind.bothChanged,
+                    localFile = localFile,
+                    remoteBytes = remoteBytes,
+                    modifier = Modifier.padding(start = 8.dp),
+                )
+            }
             Column(modifier = Modifier.padding(start = 8.dp)) {
                 Text(
                     text = item.appName.ifBlank { stringResource(R.string.sync_metadata_label) },
@@ -338,6 +384,75 @@ private fun SyncDiffRow(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun SyncDiffIcons(
+    showLocal: Boolean,
+    showRemote: Boolean,
+    bothDifferent: Boolean,
+    localFile: File?,
+    remoteBytes: ByteArray?,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (showLocal) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                SyncThumb(file = localFile, bytes = null)
+                if (bothDifferent) {
+                    Text(
+                        stringResource(R.string.sync_thumb_local),
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        style = MiuixTheme.textStyles.footnote2,
+                    )
+                }
+            }
+        }
+        if (showRemote) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                SyncThumb(file = null, bytes = remoteBytes)
+                if (bothDifferent) {
+                    Text(
+                        stringResource(R.string.sync_thumb_remote),
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        style = MiuixTheme.textStyles.footnote2,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SyncThumb(file: File?, bytes: ByteArray?) {
+    val bitmap = remember(file?.absolutePath, file?.lastModified(), bytes) {
+        when {
+            bytes != null && bytes.isNotEmpty() ->
+                runCatching { BitmapFactory.decodeByteArray(bytes, 0, bytes.size) }.getOrNull()
+            file != null && file.isFile && file.extension.lowercase() != "svg" ->
+                runCatching { BitmapFactory.decodeFile(file.absolutePath) }.getOrNull()
+            else -> null
+        }
+    }
+    Box(
+        modifier = Modifier
+            .size(40.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(MiuixTheme.colorScheme.secondaryContainer),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = null,
+                modifier = Modifier.size(36.dp),
+            )
         }
     }
 }

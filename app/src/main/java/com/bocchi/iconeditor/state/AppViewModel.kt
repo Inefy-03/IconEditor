@@ -5,8 +5,10 @@ import android.content.pm.ApplicationInfo
 import android.net.Uri
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.bocchi.iconeditor.R
@@ -146,6 +148,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         get() = if (syncApplyTotal <= 0) 0f else (syncApplyDone.toFloat() / syncApplyTotal).coerceIn(0f, 1f)
     var syncDiffPreview by mutableStateOf<ProjectSyncDiffPreview?>(null)
         private set
+    /** packageName → remote primary icon bytes (null = failed / empty). */
+    val syncRemoteThumbCache: SnapshotStateMap<String, ByteArray?> = mutableStateMapOf()
     private var syncHttpServer: ProjectSyncHttpServer? = null
 
     private val initializationJob: Job
@@ -974,6 +978,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
                 refresh()
+                if (format == ExportFormat.Apk && selectedProjectId == id) {
+                    metadata = projectMetadata[id] ?: repository.loadMetadata(id)
+                }
                 val message = if (locationLabel.isNotBlank()) {
                     getApplication<Application>().getString(R.string.export_complete_path, locationLabel)
                 } else {
@@ -1400,11 +1407,23 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     ProjectSyncDiffer.diff(local, remote)
                 }
                 syncDiffPreview = preview
+                syncRemoteThumbCache.clear()
                 syncStatusMessage = if (preview.items.isEmpty()) {
                     getApplication<Application>().getString(R.string.sync_status_aligned)
                 } else {
                     null
                 }
+                // Prefetch remote thumbs for items that need them.
+                preview.items.asSequence()
+                    .filter {
+                        it.packageName.isNotBlank() &&
+                            (it.kind == ProjectSyncKind.missingOnLocal ||
+                                it.kind == ProjectSyncKind.bothChanged ||
+                                it.kind == ProjectSyncKind.remoteOnly)
+                    }
+                    .map { it.packageName }
+                    .distinct()
+                    .forEach { ensureSyncRemoteThumb(it) }
             } catch (error: Throwable) {
                 if (error is CancellationException) throw error
                 showError(error)
@@ -1510,6 +1529,24 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun dismissSyncDiff() {
         syncDiffPreview = null
+        syncRemoteThumbCache.clear()
+    }
+
+    fun syncLocalIconFile(packageName: String): File? {
+        if (packageName.isBlank()) return null
+        val id = syncDiffPreview?.projectId ?: selectedProjectId ?: return null
+        return repository.primaryIconFile(id, packageName)
+    }
+
+    fun ensureSyncRemoteThumb(packageName: String) {
+        if (packageName.isBlank() || syncRemoteThumbCache.containsKey(packageName)) return
+        val id = syncDiffPreview?.projectId ?: selectedProjectId ?: return
+        viewModelScope.launch {
+            val bytes = withContext(Dispatchers.IO) {
+                runCatching { makeSyncClient().downloadIconThumb(id, packageName) }.getOrNull()
+            }
+            syncRemoteThumbCache[packageName] = bytes
+        }
     }
 
     fun applySyncDiff() {

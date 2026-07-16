@@ -1,5 +1,6 @@
 package com.bocchi.iconeditor.data.sync
 
+import com.bocchi.iconeditor.data.ArchiveService
 import com.bocchi.iconeditor.data.ProjectRepository
 import com.bocchi.iconeditor.model.ProjectSummary
 import java.io.File
@@ -39,11 +40,35 @@ class ProjectSyncRouteHandler(
         val parts = path.trim('/').split('/')
 
         // Icon GET/PUT: transfer raw image bytes (no zip). Concurrent OK — different packages.
+        // Thumb: GET .../icons/{package}/thumb → primary image only.
         if (parts.size >= 5 && parts[0] == "v1" && parts[1] == "projects" && parts[3] == "icons"
             && (method == "GET" || method == "PUT")
         ) {
             val projectId = java.net.URLDecoder.decode(parts[2], "UTF-8")
-            val packageName = java.net.URLDecoder.decode(parts.drop(4).joinToString("/"), "UTF-8")
+            val isThumb = method == "GET" && parts.size >= 6 && parts.last() == "thumb"
+            val packageName = java.net.URLDecoder.decode(
+                (if (isThumb) parts.subList(4, parts.size - 1) else parts.drop(4))
+                    .joinToString("/"),
+                "UTF-8",
+            )
+            if (method == "GET" && isThumb) {
+                val file = ArchiveService.listIconFiles(
+                    repository.workDirectory(projectId),
+                    packageName,
+                ).firstOrNull()
+                    ?: return ProjectSyncHttpResponse(404, body = "no icon".toByteArray())
+                val mime = when (file.extension.lowercase()) {
+                    "png" -> "image/png"
+                    "webp" -> "image/webp"
+                    "jpg", "jpeg" -> "image/jpeg"
+                    else -> "application/octet-stream"
+                }
+                return ProjectSyncHttpResponse(
+                    200,
+                    mapOf("Content-Type" to mime),
+                    file.readBytes(),
+                )
+            }
             if (method == "GET") {
                 val body = ProjectSyncPackager.packIconPackageBytes(
                     repository.workDirectory(projectId),

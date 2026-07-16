@@ -267,12 +267,14 @@
     <string name="sync_select_safe">全选非删除项</string>
     <string name="sync_select_push_local">全选推到对方</string>
     <string name="sync_select_pull_remote">全选拉到本机</string>
-    <string name="sync_only_local_hint">仅本机有</string>
-    <string name="sync_only_remote_hint">仅对方有</string>
+    <string name="sync_only_local_hint">仅本机有（%1$d）</string>
+    <string name="sync_only_remote_hint">仅对方有（%1$d）</string>
     <string name="sync_select_local_added">本机新增 → 推过去</string>
     <string name="sync_select_peer_deleted">对方已删 → 删本机</string>
     <string name="sync_select_remote_added">对方新增 → 拉过来</string>
     <string name="sync_select_local_deleted">本机已删 → 删对方</string>
+    <string name="sync_thumb_local">本机</string>
+    <string name="sync_thumb_remote">对方</string>
     <string name="sync_apply">应用选中</string>
     <string name="sync_metadata_label">项目信息 / 遮罩 / 启动器</string>
     <string name="sync_action_pull">拉到本机</string>

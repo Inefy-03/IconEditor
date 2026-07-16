@@ -233,6 +233,16 @@ class ProjectSyncClient(
         return body
     }
 
+    fun downloadIconThumb(projectId: String, packageName: String): ByteArray {
+        val encoded = java.net.URLEncoder.encode(packageName, "UTF-8").replace("+", "%20")
+        val (code, body) = request("GET", "/v1/projects/$projectId/icons/$encoded/thumb")
+        if (code == 200 && body.isNotEmpty()) return body
+        // Fallback for older peers: unpack primary from full icon package.
+        val pack = downloadIconPackageBytes(projectId, packageName)
+        return ProjectSyncPackager.primaryImageFromPackage(pack, packageName)
+            ?: error("下载图标预览失败：$packageName")
+    }
+
     fun uploadIconPackage(projectId: String, packageName: String, file: java.io.File) {
         uploadIconPackageBytes(projectId, packageName, file.readBytes())
     }

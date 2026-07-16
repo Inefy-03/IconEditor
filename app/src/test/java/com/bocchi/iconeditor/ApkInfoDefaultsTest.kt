@@ -60,4 +60,17 @@ class ApkInfoDefaultsTest {
         val resolved = ApkInfoDefaults.resolve("Project", metadata)
         assertEquals("com.iconeditor.glossyicon", resolved.packageName)
     }
+
+    @Test
+    fun bumpVersionIncrementsCodeAndName() {
+        val bumped = ApkInfoDefaults.bumpVersion(
+            ApkInfo(versionName = "1.0", versionCode = 1),
+        )
+        assertEquals(2, bumped.versionCode)
+        assertEquals("1.1", bumped.versionName)
+        assertEquals("1.0.10", ApkInfoDefaults.bumpVersionName("1.0.9"))
+        assertEquals("v3", ApkInfoDefaults.bumpVersionName("v2"))
+        assertEquals("beta.1", ApkInfoDefaults.bumpVersionName("beta"))
+        assertEquals("1.1", ApkInfoDefaults.bumpVersionName(""))
+    }
 }

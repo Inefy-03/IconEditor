@@ -268,12 +268,14 @@
     <string name="sync_select_safe">Select non-deletion items</string>
     <string name="sync_select_push_local">Select all push to peer</string>
     <string name="sync_select_pull_remote">Select all pull to local</string>
-    <string name="sync_only_local_hint">Only on local</string>
-    <string name="sync_only_remote_hint">Only on peer</string>
+    <string name="sync_only_local_hint">Only on local (%1$d)</string>
+    <string name="sync_only_remote_hint">Only on peer (%1$d)</string>
     <string name="sync_select_local_added">Local added → push</string>
     <string name="sync_select_peer_deleted">Peer deleted → delete local</string>
     <string name="sync_select_remote_added">Peer added → pull</string>
     <string name="sync_select_local_deleted">Local deleted → delete peer</string>
+    <string name="sync_thumb_local">Local</string>
+    <string name="sync_thumb_remote">Peer</string>
     <string name="sync_apply">Apply selected</string>
     <string name="sync_metadata_label">Project info / masks / launcher</string>
     <string name="sync_action_pull">Pull local</string>
