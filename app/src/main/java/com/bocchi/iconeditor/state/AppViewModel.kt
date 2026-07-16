@@ -157,14 +157,31 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private fun initialize(): Job = viewModelScope.launch {
         try {
             val initialData = withContext(Dispatchers.IO) {
+                var loadedSettings = repository.loadSettings()
+                // Upgrade path: previously paired installs had no syncServerWanted flag.
+                if (loadedSettings.syncPeerToken.isNotBlank() && loadedSettings.syncServerToken.isBlank()) {
+                    loadedSettings = loadedSettings.copy(syncServerWanted = true)
+                    repository.saveSettings(loadedSettings)
+                }
                 val loadedProjects = repository.loadProjects()
                 InitialData(
+                    settings = loadedSettings,
                     projects = loadedProjects,
                     projectMetadata = loadedProjects.associate { it.id to repository.loadMetadata(it.id) },
                 )
             }
+            settings = initialData.settings
+            syncPeerHost = initialData.settings.syncPeerHost
+            syncPeerPort = initialData.settings.syncPeerPort.ifBlank {
+                ProjectSyncConstants.DEFAULT_PORT.toString()
+            }
+            syncPeerToken = initialData.settings.syncPeerToken
+            syncServerToken = initialData.settings.syncServerToken
             projects = initialData.projects
             projectMetadata = initialData.projectMetadata
+            if (initialData.settings.syncServerWanted) {
+                startSyncServer()
+            }
         } catch (cancellation: CancellationException) {
             throw cancellation
         } catch (error: Throwable) {
@@ -223,7 +240,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     override fun onCleared() {
-        stopSyncServer()
+        stopSyncServer(userInitiated = false)
         super.onCleared()
     }
 
@@ -1136,10 +1153,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     // MARK: Project LAN sync
 
     fun startSyncServer() {
-        stopSyncServer()
+        stopSyncServer(userInitiated = false)
         viewModelScope.launch(Dispatchers.IO) {
             runCatching {
-                val token = java.util.UUID.randomUUID().toString().replace("-", "")
+                val token = stableSyncServerToken()
                 val handler = ProjectSyncRouteHandler(
                     repository = repository,
                     resolveAppName = { packageNameRepository.resolveAppName(it, null) },
@@ -1167,6 +1184,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     syncServerPort = ProjectSyncConstants.DEFAULT_PORT
                     syncServerToken = token
                     syncLanAddress = ProjectSyncOrchestrator.preferredLanAddress()
+                    updateSettings(
+                        settings.copy(
+                            syncServerToken = token,
+                            syncServerWanted = true,
+                        ),
+                    )
                     syncStatusMessage = getApplication<Application>().getString(
                         R.string.sync_server_running,
                         syncLanAddress ?: "0.0.0.0",
@@ -1182,6 +1205,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** Prefer a persisted host token so previously paired peers keep working. */
+    private fun stableSyncServerToken(): String {
+        val existing = settings.syncServerToken.trim()
+        if (existing.isNotEmpty()) return existing
+        val token = java.util.UUID.randomUUID().toString().replace("-", "")
+        // Persist immediately so concurrent starts share the same token.
+        repository.saveSettings(settings.copy(syncServerToken = token))
+        settings = settings.copy(syncServerToken = token)
+        return token
+    }
+
     fun applyIncomingPeerAnnounce(announce: ProjectSyncPeerAnnounce) {
         syncPeerHost = announce.host.trim()
         syncPeerPort = announce.port.toString()
@@ -1191,6 +1225,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 syncPeerHost = syncPeerHost,
                 syncPeerPort = syncPeerPort.ifBlank { ProjectSyncConstants.DEFAULT_PORT.toString() },
                 syncPeerToken = syncPeerToken,
+                syncServerWanted = true,
             ),
         )
         syncStatusMessage = getApplication<Application>().getString(R.string.sync_mutual_paired)
@@ -1226,7 +1261,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 if (!syncServerRunning) {
                     val started = withContext(Dispatchers.IO) {
                         runCatching {
-                            val token = java.util.UUID.randomUUID().toString().replace("-", "")
+                            val token = stableSyncServerToken()
                             val handler = ProjectSyncRouteHandler(
                                 repository = repository,
                                 resolveAppName = { packageNameRepository.resolveAppName(it, null) },
@@ -1242,7 +1277,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                                     }
                                 },
                             )
-                            stopSyncServer()
+                            stopSyncServer(userInitiated = false)
                             val server = ProjectSyncHttpServer(
                                 port = ProjectSyncConstants.DEFAULT_PORT,
                                 token = token,
@@ -1257,6 +1292,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     syncServerToken = started.first
                     syncServerPort = started.second
                     syncLanAddress = started.third
+                    updateSettings(
+                        settings.copy(
+                            syncServerToken = started.first,
+                            syncServerWanted = true,
+                        ),
+                    )
                 }
                 val host = syncLanAddress
                     ?: withContext(Dispatchers.IO) { ProjectSyncOrchestrator.preferredLanAddress() }
@@ -1290,6 +1331,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 syncPeerHost = syncPeerHost.trim(),
                 syncPeerPort = syncPeerPort.trim().ifBlank { ProjectSyncConstants.DEFAULT_PORT.toString() },
                 syncPeerToken = syncPeerToken.trim(),
+                syncServerWanted = true,
             ),
         )
         syncStatusMessage = getApplication<Application>().getString(R.string.sync_scan_filled)
@@ -1297,11 +1339,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         return true
     }
 
-    fun stopSyncServer() {
+    fun stopSyncServer(userInitiated: Boolean = true) {
         syncHttpServer?.stop()
         syncHttpServer = null
         syncServerRunning = false
         syncStatusMessage = null
+        if (userInitiated) {
+            updateSettings(settings.copy(syncServerWanted = false))
+        }
     }
 
     private fun makeSyncClient(): ProjectSyncClient {
@@ -1402,6 +1447,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun selectSyncDiffNone() {
         val preview = syncDiffPreview ?: return
         syncDiffPreview = preview.copy(items = preview.items.map { it.copy(selected = false) })
+    }
+
+    fun selectSyncDiffAll() {
+        val preview = syncDiffPreview ?: return
+        syncDiffPreview = preview.copy(
+            items = preview.items.map { it.copy(selected = true) },
+        )
     }
 
     fun selectSyncDiffPushLocalOnly() {
@@ -1526,6 +1578,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private data class InitialData(
+        val settings: AppSettings,
         val projects: List<ProjectSummary>,
         val projectMetadata: Map<String, ProjectMetadata>,
     )

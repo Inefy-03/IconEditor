@@ -179,6 +179,7 @@ fun ProjectSyncDiffDialog(
     onSelectDeleteLocal: () -> Unit,
     onSelectPullRemote: () -> Unit,
     onSelectDeleteRemote: () -> Unit,
+    onSelectAll: () -> Unit,
     onSelectNone: () -> Unit,
     onDismiss: () -> Unit,
     onApply: () -> Unit,
@@ -231,6 +232,9 @@ fun ProjectSyncDiffDialog(
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                Button(modifier = Modifier.weight(1f), onClick = onSelectAll) {
+                    Text(stringResource(R.string.icon_import_select_all))
+                }
                 Button(modifier = Modifier.weight(1f), onClick = onSelectNone) {
                     Text(stringResource(R.string.icon_import_select_none))
                 }

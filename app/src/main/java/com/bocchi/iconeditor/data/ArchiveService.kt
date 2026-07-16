@@ -127,6 +127,53 @@ object ArchiveService {
             .toList()
     }
 
+    /** Fast package scan for sync inventory — size/mtime only, no image decode. */
+    fun scanIconAssetsLite(workDir: File): List<IconAsset> {
+        val iconRoot = File(workDir, "icons/res/drawable-xxhdpi")
+        if (!iconRoot.exists()) return emptyList()
+        return iconRoot.listFiles()
+            .orEmpty()
+            .asSequence()
+            .filter { it.isFile && it.extension.lowercase() in imageExtensions }
+            .map { file ->
+                val name = file.nameWithoutExtension
+                val packageName = name.removeVariantSuffix()
+                IconAsset(
+                    packageName = packageName,
+                    variantKey = name,
+                    archivePath = file.relativeTo(workDir).invariantSeparatorsPath,
+                    fileName = file.name,
+                    width = 0,
+                    height = 0,
+                    lastModified = file.lastModified(),
+                )
+            }
+            .filter { it.packageName !in ApkPackAssets.MaskLayer.resourceNames }
+            .sortedBy { it.packageName }
+            .toList()
+    }
+
+    /** Fast path for sync: list files for one package without decoding image bounds. */
+    fun listIconFiles(workDir: File, packageName: String): List<File> {
+        if (packageName.isBlank() || packageName in ApkPackAssets.MaskLayer.resourceNames) return emptyList()
+        val iconRoot = File(workDir, "icons/res/drawable-xxhdpi")
+        if (!iconRoot.isDirectory) return emptyList()
+        return iconRoot.listFiles()
+            .orEmpty()
+            .asSequence()
+            .filter { it.isFile && it.extension.lowercase() in imageExtensions }
+            .filter { it.nameWithoutExtension.removeVariantSuffix() == packageName }
+            .sortedWith(
+                compareBy<File> { variantOrder(it.nameWithoutExtension, packageName) }
+                    .thenBy { it.name },
+            )
+            .toList()
+    }
+
+    fun deleteIconFiles(workDir: File, packageName: String) {
+        listIconFiles(workDir, packageName).forEach { it.delete() }
+    }
+
     fun normalizeIconVariants(
         workDir: File,
         packageName: String,

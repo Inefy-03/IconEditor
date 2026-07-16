@@ -226,13 +226,24 @@ class ProjectSyncClient(
         file.writeBytes(body)
     }
 
+    fun downloadIconPackageBytes(projectId: String, packageName: String): ByteArray {
+        val encoded = java.net.URLEncoder.encode(packageName, "UTF-8").replace("+", "%20")
+        val (code, body) = request("GET", "/v1/projects/$projectId/icons/$encoded")
+        require(code == 200) { "下载图标失败：$packageName" }
+        return body
+    }
+
     fun uploadIconPackage(projectId: String, packageName: String, file: java.io.File) {
+        uploadIconPackageBytes(projectId, packageName, file.readBytes())
+    }
+
+    fun uploadIconPackageBytes(projectId: String, packageName: String, data: ByteArray) {
         val encoded = java.net.URLEncoder.encode(packageName, "UTF-8").replace("+", "%20")
         val (code, _) = request(
             "PUT",
             "/v1/projects/$projectId/icons/$encoded",
-            file.readBytes(),
-            "application/zip",
+            data,
+            ProjectSyncBundle.CONTENT_TYPE,
         )
         require(code == 200) { "上传图标失败：$packageName" }
     }
@@ -244,17 +255,25 @@ class ProjectSyncClient(
     }
 
     fun pullMetadataPack(projectId: String, file: java.io.File) {
+        file.writeBytes(pullMetadataBytes(projectId))
+    }
+
+    fun pullMetadataBytes(projectId: String): ByteArray {
         val (code, body) = request("GET", "/v1/projects/$projectId/meta")
         require(code == 200) { "下载元数据失败" }
-        file.writeBytes(body)
+        return body
     }
 
     fun pushMetadataPack(projectId: String, file: java.io.File) {
+        pushMetadataBytes(projectId, file.readBytes())
+    }
+
+    fun pushMetadataBytes(projectId: String, data: ByteArray) {
         val (code, _) = request(
             "PUT",
             "/v1/projects/$projectId/meta",
-            file.readBytes(),
-            "application/zip",
+            data,
+            ProjectSyncBundle.CONTENT_TYPE,
         )
         require(code == 200) { "上传元数据失败" }
     }

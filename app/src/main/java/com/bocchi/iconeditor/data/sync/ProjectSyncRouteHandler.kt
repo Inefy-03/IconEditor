@@ -38,36 +38,24 @@ class ProjectSyncRouteHandler(
 
         val parts = path.trim('/').split('/')
 
-        // Icon GET/PUT: different packages write different files — allow concurrent work.
+        // Icon GET/PUT: transfer raw image bytes (no zip). Concurrent OK — different packages.
         if (parts.size >= 5 && parts[0] == "v1" && parts[1] == "projects" && parts[3] == "icons"
             && (method == "GET" || method == "PUT")
         ) {
             val projectId = java.net.URLDecoder.decode(parts[2], "UTF-8")
             val packageName = java.net.URLDecoder.decode(parts.drop(4).joinToString("/"), "UTF-8")
             if (method == "GET") {
-                val zip = File(cacheDir, "icon-${UUID.randomUUID()}.zip")
-                try {
-                    ProjectSyncPackager.packIconPackage(
-                        repository.workDirectory(projectId),
-                        packageName,
-                        zip,
-                    )
-                    return ProjectSyncHttpResponse(
-                        200,
-                        mapOf("Content-Type" to "application/zip"),
-                        zip.readBytes(),
-                    )
-                } finally {
-                    zip.delete()
-                }
+                val body = ProjectSyncPackager.packIconPackageBytes(
+                    repository.workDirectory(projectId),
+                    packageName,
+                )
+                return ProjectSyncHttpResponse(
+                    200,
+                    mapOf("Content-Type" to ProjectSyncBundle.CONTENT_TYPE),
+                    body,
+                )
             }
-            val zip = File(cacheDir, "icon-in-${UUID.randomUUID()}.zip")
-            zip.writeBytes(request.body)
-            try {
-                repository.applySyncIconZip(projectId, packageName, zip, rebuildMapping = false)
-            } finally {
-                zip.delete()
-            }
+            repository.applySyncIconBytes(projectId, packageName, request.body, rebuildMapping = false)
             return ProjectSyncHttpResponse.json(200, """{"ok":true}""")
         }
 
@@ -133,24 +121,18 @@ class ProjectSyncRouteHandler(
 
         if (parts.size == 4 && parts[3] == "meta") {
             if (method == "GET") {
-                val zip = File(cacheDir, "meta-${UUID.randomUUID()}.zip")
-                repository.packSyncMeta(projectId, zip)
-                val data = zip.readBytes()
-                zip.delete()
+                val body = ProjectSyncPackager.packMetaBytes(
+                    repository.projectDirectory(projectId),
+                    repository.workDirectory(projectId),
+                )
                 return ProjectSyncHttpResponse(
                     200,
-                    mapOf("Content-Type" to "application/zip"),
-                    data,
+                    mapOf("Content-Type" to ProjectSyncBundle.CONTENT_TYPE),
+                    body,
                 )
             }
             if (method == "PUT") {
-                val zip = File(cacheDir, "meta-in-${UUID.randomUUID()}.zip")
-                zip.writeBytes(request.body)
-                try {
-                    repository.applySyncMeta(projectId, zip)
-                } finally {
-                    zip.delete()
-                }
+                repository.applySyncMetaBytes(projectId, request.body)
                 return ProjectSyncHttpResponse.json(200, """{"ok":true}""")
             }
         }
@@ -167,8 +149,8 @@ class ProjectSyncRouteHandler(
     }
 }
 
-object ProjectSyncOrchestrator {
-    const val APPLY_CONCURRENCY = 8
+    object ProjectSyncOrchestrator {
+    const val APPLY_CONCURRENCY = 32
 
     fun applySelected(
         preview: ProjectSyncDiffPreview,
@@ -234,15 +216,10 @@ object ProjectSyncOrchestrator {
 
         if (localDeletes.isNotEmpty()) {
             val packages = localDeletes.map { it.packageName }.filter { it.isNotBlank() }.toSet()
+            val work = repository.workDirectory(projectId)
             for (item in localDeletes) {
                 report(item.appName.ifBlank { item.packageName })
-                // Delete files only; batch prefs/mapping once below.
-                val work = repository.workDirectory(projectId)
-                for (asset in com.bocchi.iconeditor.data.ArchiveService.scanIconAssets(work)
-                    .filter { it.packageName == item.packageName }
-                ) {
-                    java.io.File(work, asset.archivePath).delete()
-                }
+                com.bocchi.iconeditor.data.ArchiveService.deleteIconFiles(work, item.packageName)
                 advance()
             }
             repository.deleteSyncIconPackagesBatch(projectId, packages)
@@ -259,21 +236,20 @@ object ProjectSyncOrchestrator {
         projectId: String,
         cacheDir: File,
     ) {
-        val tmp = File(cacheDir, "sync-meta-${UUID.randomUUID()}.zip")
-        try {
-            when (item.action) {
-                ProjectSyncAction.pullToLocal -> {
-                    client.pullMetadataPack(projectId, tmp)
-                    repository.applySyncMeta(projectId, tmp)
-                }
-                ProjectSyncAction.pushToRemote -> {
-                    repository.packSyncMeta(projectId, tmp)
-                    client.pushMetadataPack(projectId, tmp)
-                }
-                else -> Unit
+        when (item.action) {
+            ProjectSyncAction.pullToLocal -> {
+                repository.applySyncMetaBytes(projectId, client.pullMetadataBytes(projectId))
             }
-        } finally {
-            tmp.delete()
+            ProjectSyncAction.pushToRemote -> {
+                client.pushMetadataBytes(
+                    projectId,
+                    ProjectSyncPackager.packMetaBytes(
+                        repository.projectDirectory(projectId),
+                        repository.workDirectory(projectId),
+                    ),
+                )
+            }
+            else -> Unit
         }
     }
 
@@ -286,26 +262,20 @@ object ProjectSyncOrchestrator {
     ) {
         val packageName = item.packageName
         if (packageName.isBlank()) return
-        val tmp = File(cacheDir, "sync-icon-${UUID.randomUUID()}.zip")
-        try {
-            when (item.action) {
-                ProjectSyncAction.pullToLocal -> {
-                    client.downloadIconPackage(projectId, packageName, tmp)
-                    repository.applySyncIconZip(projectId, packageName, tmp, rebuildMapping = false)
-                }
-                ProjectSyncAction.pushToRemote -> {
-                    ProjectSyncPackager.packIconPackage(
-                        repository.workDirectory(projectId),
-                        packageName,
-                        tmp,
-                    )
-                    client.uploadIconPackage(projectId, packageName, tmp)
-                }
-                ProjectSyncAction.deleteRemote -> client.deleteIconPackage(projectId, packageName)
-                else -> Unit
+        when (item.action) {
+            ProjectSyncAction.pullToLocal -> {
+                val data = client.downloadIconPackageBytes(projectId, packageName)
+                repository.applySyncIconBytes(projectId, packageName, data, rebuildMapping = false)
             }
-        } finally {
-            tmp.delete()
+            ProjectSyncAction.pushToRemote -> {
+                val data = ProjectSyncPackager.packIconPackageBytes(
+                    repository.workDirectory(projectId),
+                    packageName,
+                )
+                client.uploadIconPackageBytes(projectId, packageName, data)
+            }
+            ProjectSyncAction.deleteRemote -> client.deleteIconPackage(projectId, packageName)
+            else -> Unit
         }
     }
 

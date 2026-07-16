@@ -243,6 +243,8 @@
     <string name="sync_section_connect">连接对方</string>
     <string name="sync_host_hint">开启后，同 Wi‑Fi 下对方可扫码；扫码方会回写本机地址，配对后两端都可点「同步」对比项目文件。</string>
     <string name="sync_connect_hint">扫码或保存对方后，会自动开启本机服务并完成互相配对，随后两端都可发起同步。</string>
+    <string name="sync_server_toggle">同步服务</string>
+    <string name="sync_server_toggle_off">开启后同网设备可扫码配对</string>
     <string name="sync_start_server">开启同步服务</string>
     <string name="sync_stop_server">停止同步服务</string>
     <string name="sync_server_running">已监听 %1$s:%2$d</string>

@@ -400,6 +400,13 @@ private fun IconEditorApp(
                                             sortField = viewModel.settings.projectSortField,
                                             contentPadding = contentPadding.withPageMargins(),
                                             scrollToTopRequest = viewModel.projectsScrollToTopRequest,
+                                            syncServerRunning = viewModel.syncServerRunning,
+                                            syncLanAddress = viewModel.syncLanAddress,
+                                            syncServerPort = viewModel.syncServerPort,
+                                            onToggleSyncServer = { enabled ->
+                                                if (enabled) viewModel.startSyncServer()
+                                                else viewModel.stopSyncServer()
+                                            },
                                             onEditInfo = {
                                                 infoTab = InfoTab.Mtz
                                                 viewModel.loadProject(it.id, loadIcons = false)
@@ -729,6 +736,7 @@ private fun IconEditorApp(
                     onSelectDeleteLocal = viewModel::selectSyncDiffDeleteLocalOnly,
                     onSelectPullRemote = viewModel::selectSyncDiffPullRemoteOnly,
                     onSelectDeleteRemote = viewModel::selectSyncDiffDeleteRemoteOnly,
+                    onSelectAll = viewModel::selectSyncDiffAll,
                     onSelectNone = viewModel::selectSyncDiffNone,
                     onDismiss = viewModel::dismissSyncDiff,
                     onApply = viewModel::applySyncDiff,

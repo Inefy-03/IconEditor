@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
@@ -57,6 +58,7 @@ import top.yukonga.miuix.kmp.icon.extended.GridView
 import top.yukonga.miuix.kmp.icon.extended.Info
 import top.yukonga.miuix.kmp.icon.extended.Remove
 import top.yukonga.miuix.kmp.icon.extended.Replace
+import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 
@@ -67,6 +69,10 @@ fun ProjectsPage(
     sortField: ProjectSortField = ProjectSortField.CreatedAt,
     contentPadding: PaddingValues = PaddingValues(12.dp),
     scrollToTopRequest: Int = 0,
+    syncServerRunning: Boolean = false,
+    syncLanAddress: String? = null,
+    syncServerPort: Int = 0,
+    onToggleSyncServer: (Boolean) -> Unit = {},
     onEditInfo: (ProjectSummary) -> Unit,
     onEditIcons: (ProjectSummary) -> Unit,
     onSync: (ProjectSummary) -> Unit,
@@ -91,8 +97,17 @@ fun ProjectsPage(
                     .fillMaxSize()
                     .overScrollVertical(),
                 contentPadding = contentPadding,
+                verticalArrangement = Arrangement.spacedBy(12.dp),
                 overscrollEffect = null,
             ) {
+                item {
+                    SyncServerToggleCard(
+                        running = syncServerRunning,
+                        lanAddress = syncLanAddress,
+                        port = syncServerPort,
+                        onToggle = onToggleSyncServer,
+                    )
+                }
                 item {
                     EmptyState(
                         text = stringResource(R.string.empty_projects),
@@ -116,6 +131,14 @@ fun ProjectsPage(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             overscrollEffect = null,
         ) {
+            item(span = { GridItemSpan(maxLineSpan) }, key = "sync-server-toggle") {
+                SyncServerToggleCard(
+                    running = syncServerRunning,
+                    lanAddress = syncLanAddress,
+                    port = syncServerPort,
+                    onToggle = onToggleSyncServer,
+                )
+            }
             gridItems(sortedProjects, key = { it.id }) { project ->
                 ProjectCard(
                     project,
@@ -129,6 +152,34 @@ fun ProjectsPage(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun SyncServerToggleCard(
+    running: Boolean,
+    lanAddress: String?,
+    port: Int,
+    onToggle: (Boolean) -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        insideMargin = PaddingValues(0.dp),
+    ) {
+        SwitchPreference(
+            title = stringResource(R.string.sync_server_toggle),
+            summary = if (running) {
+                stringResource(
+                    R.string.sync_server_running,
+                    lanAddress ?: "0.0.0.0",
+                    port,
+                )
+            } else {
+                stringResource(R.string.sync_server_toggle_off)
+            },
+            checked = running,
+            onCheckedChange = onToggle,
+        )
     }
 }
 

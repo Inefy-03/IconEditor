@@ -51,94 +51,103 @@ object ProjectSyncPackager {
     }
 
     fun packIconPackage(workDir: File, packageName: String, destination: File) {
-        val assets = ArchiveService.scanIconAssets(workDir).filter { it.packageName == packageName }
-        require(assets.isNotEmpty()) { "无图标：$packageName" }
-        val staging = File(destination.parentFile, "ie-icon-${UUID.randomUUID()}").also { it.mkdirs() }
-        try {
-            for (asset in assets) {
-                File(workDir, asset.archivePath).copyTo(File(staging, asset.fileName), overwrite = true)
-            }
-            if (destination.exists()) destination.delete()
-            zipDirectory(staging, destination)
-        } finally {
-            staging.deleteRecursively()
-        }
+        destination.parentFile?.mkdirs()
+        destination.writeBytes(packIconPackageBytes(workDir, packageName))
+    }
+
+    fun packIconPackageBytes(workDir: File, packageName: String): ByteArray {
+        val files = ArchiveService.listIconFiles(workDir, packageName)
+        require(files.isNotEmpty()) { "无图标：$packageName" }
+        return ProjectSyncBundle.encodeFiles(files)
     }
 
     fun applyIconPackageZip(zip: File, workDir: File, packageName: String) {
-        for (asset in ArchiveService.scanIconAssets(workDir).filter { it.packageName == packageName }) {
-            File(workDir, asset.archivePath).delete()
-        }
-        val staging = File(workDir.parentFile ?: workDir, "ie-icon-in-${UUID.randomUUID()}").also { it.mkdirs() }
-        try {
-            unzip(zip, staging)
-            val iconRoot = File(workDir, "icons/res/drawable-xxhdpi").also { it.mkdirs() }
-            val files = staging.walkTopDown()
-                .filter { it.isFile && it.extension.lowercase() in imageExt }
-                .sortedBy { it.name }
-                .toList()
-            files.forEachIndexed { index, file ->
-                val suffix = if (index == 0) "" else "_$index"
-                val dest = File(iconRoot, "$packageName$suffix.${file.extension}")
-                if (dest.exists()) dest.delete()
-                file.copyTo(dest, overwrite = true)
+        applyIconPackageBytes(zip.readBytes(), workDir, packageName)
+    }
+
+    fun applyIconPackageBytes(data: ByteArray, workDir: File, packageName: String) {
+        ArchiveService.deleteIconFiles(workDir, packageName)
+        val iconRoot = File(workDir, "icons/res/drawable-xxhdpi").also { it.mkdirs() }
+        val entries = if (ProjectSyncBundle.isBundle(data)) {
+            ProjectSyncBundle.decode(data)
+                .filter { it.second.isNotEmpty() }
+                .sortedBy { it.first }
+        } else {
+            // Legacy zip from older peers.
+            val staged = mutableListOf<Pair<String, ByteArray>>()
+            ZipInputStream(BufferedInputStream(java.io.ByteArrayInputStream(data))).use { zis ->
+                var entry = zis.nextEntry
+                while (entry != null) {
+                    if (!entry.isDirectory) {
+                        val name = entry.name.substringAfterLast('/')
+                        val ext = name.substringAfterLast('.', "").lowercase()
+                        if (ext in imageExt) staged += name to zis.readBytes()
+                    }
+                    zis.closeEntry()
+                    entry = zis.nextEntry
+                }
             }
-        } finally {
-            staging.deleteRecursively()
+            staged.sortedBy { it.first }
+        }
+        entries.forEachIndexed { index, (name, bytes) ->
+            val ext = name.substringAfterLast('.', "png").ifBlank { "png" }
+            val suffix = if (index == 0) "" else "_$index"
+            File(iconRoot, "$packageName$suffix.$ext").writeBytes(bytes)
         }
     }
 
     fun packMeta(projectDir: File, workDir: File, destination: File) {
-        val staging = File(destination.parentFile, "ie-meta-${UUID.randomUUID()}").also { it.mkdirs() }
-        try {
-            for (name in listOf("metadata.json", "preferences.json", "icon_mapping.json")) {
-                val src = File(projectDir, name)
-                if (src.isFile) src.copyTo(File(staging, name), overwrite = true)
-            }
-            val assetRelPaths = listOf(
-                ApkPackAssets.LAUNCHER_ICON_PATH,
-                ApkPackAssets.MaskLayer.Back.relativePath,
-                ApkPackAssets.MaskLayer.Mask.relativePath,
-                ApkPackAssets.MaskLayer.Upon.relativePath,
-            )
-            for (relative in assetRelPaths) {
-                val src = File(workDir, relative)
-                if (!src.isFile) continue
-                val dest = File(staging, relative)
-                dest.parentFile?.mkdirs()
-                src.copyTo(dest, overwrite = true)
-            }
-            if (destination.exists()) destination.delete()
-            zipDirectory(staging, destination)
-        } finally {
-            staging.deleteRecursively()
+        destination.parentFile?.mkdirs()
+        destination.writeBytes(packMetaBytes(projectDir, workDir))
+    }
+
+    fun packMetaBytes(projectDir: File, workDir: File): ByteArray {
+        val entries = mutableListOf<Pair<String, ByteArray>>()
+        for (name in listOf("metadata.json", "preferences.json", "icon_mapping.json")) {
+            val src = File(projectDir, name)
+            if (src.isFile) entries += name to src.readBytes()
         }
+        for (relative in listOf(
+            ApkPackAssets.LAUNCHER_ICON_PATH,
+            ApkPackAssets.MaskLayer.Back.relativePath,
+            ApkPackAssets.MaskLayer.Mask.relativePath,
+            ApkPackAssets.MaskLayer.Upon.relativePath,
+        )) {
+            val src = File(workDir, relative)
+            if (src.isFile) entries += relative to src.readBytes()
+        }
+        return ProjectSyncBundle.encode(entries)
     }
 
     fun applyMeta(zip: File, projectDir: File, workDir: File) {
-        val staging = File(projectDir.parentFile ?: projectDir, "ie-meta-in-${UUID.randomUUID()}").also { it.mkdirs() }
-        try {
-            unzip(zip, staging)
-            for (name in listOf("metadata.json", "preferences.json", "icon_mapping.json")) {
-                val src = File(staging, name)
-                if (!src.isFile) continue
-                src.copyTo(File(projectDir, name), overwrite = true)
+        applyMetaBytes(zip.readBytes(), projectDir, workDir)
+    }
+
+    fun applyMetaBytes(data: ByteArray, projectDir: File, workDir: File) {
+        val entries = if (ProjectSyncBundle.isBundle(data)) {
+            ProjectSyncBundle.decode(data)
+        } else {
+            val staging = File(projectDir.parentFile ?: projectDir, "ie-meta-in-${UUID.randomUUID()}").also { it.mkdirs() }
+            try {
+                val tmp = File(staging, "legacy.zip").also { it.writeBytes(data) }
+                unzip(tmp, staging)
+                staging.walkTopDown().filter { it.isFile && it.name != "legacy.zip" }.map {
+                    it.relativeTo(staging).invariantSeparatorsPath to it.readBytes()
+                }.toList()
+            } finally {
+                staging.deleteRecursively()
             }
-            val assetRelPaths = listOf(
-                ApkPackAssets.LAUNCHER_ICON_PATH,
-                ApkPackAssets.MaskLayer.Back.relativePath,
-                ApkPackAssets.MaskLayer.Mask.relativePath,
-                ApkPackAssets.MaskLayer.Upon.relativePath,
-            )
-            for (relative in assetRelPaths) {
-                val src = File(staging, relative)
-                if (!src.isFile) continue
-                val dest = File(workDir, relative)
-                dest.parentFile?.mkdirs()
-                src.copyTo(dest, overwrite = true)
+        }
+        for ((name, bytes) in entries) {
+            when (name) {
+                "metadata.json", "preferences.json", "icon_mapping.json" ->
+                    File(projectDir, name).writeBytes(bytes)
+                else -> {
+                    val dest = File(workDir, name)
+                    dest.parentFile?.mkdirs()
+                    dest.writeBytes(bytes)
+                }
             }
-        } finally {
-            staging.deleteRecursively()
         }
     }
 

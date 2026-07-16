@@ -998,10 +998,16 @@ class ProjectRepository(private val context: Context) {
         }
     }
 
-    fun deleteSyncIconPackage(id: String, packageName: String) {
-        for (asset in ArchiveService.scanIconAssets(workDir(id)).filter { it.packageName == packageName }) {
-            File(workDir(id), asset.archivePath).delete()
+    fun applySyncIconBytes(id: String, packageName: String, data: ByteArray, rebuildMapping: Boolean = true) {
+        ProjectSyncPackager.applyIconPackageBytes(data, workDir(id), packageName)
+        if (rebuildMapping) {
+            syncIconMapping(id)
+            markDirty(id)
         }
+    }
+
+    fun deleteSyncIconPackage(id: String, packageName: String) {
+        ArchiveService.deleteIconFiles(workDir(id), packageName)
         val prefs = loadIconPreferences(id)
         saveIconPreferences(
             id,
@@ -1050,6 +1056,11 @@ class ProjectRepository(private val context: Context) {
 
     fun applySyncMeta(id: String, zip: File) {
         ProjectSyncPackager.applyMeta(zip, projectDir(id), workDir(id))
+        markDirty(id)
+    }
+
+    fun applySyncMetaBytes(id: String, data: ByteArray) {
+        ProjectSyncPackager.applyMetaBytes(data, projectDir(id), workDir(id))
         markDirty(id)
     }
 

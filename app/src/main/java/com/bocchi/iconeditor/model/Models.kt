@@ -242,6 +242,10 @@ data class AppSettings(
     val syncPeerHost: String = "",
     val syncPeerPort: String = "18765",
     val syncPeerToken: String = "",
+    /** Stable host token so peers don't need to re-pair after restart. */
+    val syncServerToken: String = "",
+    /** Auto-start LAN sync host on launch (set when user enables / after pairing). */
+    val syncServerWanted: Boolean = false,
 )
 
 @Serializable

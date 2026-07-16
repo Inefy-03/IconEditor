@@ -16,7 +16,7 @@ object ProjectSyncInventoryBuilder {
         preferencesFile: File,
         resolveAppName: (String) -> String,
     ): ProjectSyncInventory {
-        val icons = ArchiveService.scanIconAssets(workDir)
+        val icons = ArchiveService.scanIconAssetsLite(workDir)
         val grouped = icons.groupBy { it.packageName }
         val iconEntries = grouped.keys.sorted().map { packageName ->
             val variants = grouped[packageName].orEmpty()
