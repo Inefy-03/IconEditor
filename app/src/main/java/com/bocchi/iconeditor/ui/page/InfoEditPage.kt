@@ -1,16 +1,13 @@
 package com.bocchi.iconeditor.ui.page
 
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.runtime.Composable
@@ -18,7 +15,10 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.res.stringResource
@@ -30,7 +30,6 @@ import com.bocchi.iconeditor.model.MtzInfo
 import com.bocchi.iconeditor.model.ProjectMetadata
 import com.bocchi.iconeditor.ui.component.withPageMargins
 import kotlinx.coroutines.delay
-import top.yukonga.miuix.kmp.anim.SinOutEasing
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 
@@ -38,21 +37,34 @@ import top.yukonga.miuix.kmp.utils.overScrollVertical
 fun InfoEditPage(
     metadata: ProjectMetadata,
     selectedTab: InfoTab,
+    onSelectedTab: (InfoTab) -> Unit,
     contentPadding: PaddingValues = PaddingValues(),
     onSaveMtz: (MtzInfo) -> Unit,
     onSaveModule: (ModuleInfo) -> Unit,
 ) {
     val pagePadding = contentPadding.withPageMargins(horizontal = 16.dp)
-    AnimatedContent(
-        targetState = selectedTab,
-        transitionSpec = {
-            val direction = if (targetState.ordinal > initialState.ordinal) 1 else -1
-            slideInHorizontally(tween(350, easing = SinOutEasing)) { it * direction } togetherWith
-                slideOutHorizontally(tween(350, easing = SinOutEasing)) { it * -direction }
-        },
+    val pagerState = rememberPagerState(initialPage = selectedTab.ordinal) { InfoTab.entries.size }
+    val latestOnSelectedTab by rememberUpdatedState(onSelectedTab)
+
+    LaunchedEffect(selectedTab, pagerState) {
+        val selectedPage = selectedTab.ordinal
+        if (pagerState.targetPage != selectedPage) {
+            pagerState.animateScrollToPage(selectedPage)
+        }
+    }
+    LaunchedEffect(pagerState) {
+        snapshotFlow { pagerState.currentPage }.collect { page ->
+            latestOnSelectedTab(InfoTab.entries[page])
+        }
+    }
+
+    HorizontalPager(
+        state = pagerState,
         modifier = Modifier.fillMaxSize(),
-    ) { tab ->
-        when (tab) {
+        verticalAlignment = Alignment.Top,
+        beyondViewportPageCount = 1,
+    ) { page ->
+        when (InfoTab.entries[page]) {
             InfoTab.Mtz -> MtzInfoForm(
                 info = metadata.mtz,
                 onChange = onSaveMtz,

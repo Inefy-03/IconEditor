@@ -8,6 +8,14 @@ plugins {
 
 import java.util.Properties
 
+val appGitCommitCount = providers.exec {
+    workingDir(rootDir)
+    commandLine("git", "rev-list", "--count", "HEAD", "--", "app")
+    isIgnoreExitValue = true
+}.standardOutput.asText.map { output ->
+    output.trim().toIntOrNull()?.coerceAtLeast(1) ?: 1
+}
+
 android {
     namespace = "com.bocchi.iconeditor"
     compileSdk = 37
@@ -16,7 +24,7 @@ android {
         applicationId = "com.bocchi.iconeditor"
         minSdk = 33
         targetSdk = 36
-        versionCode = 1
+        versionCode = appGitCommitCount.get()
         versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

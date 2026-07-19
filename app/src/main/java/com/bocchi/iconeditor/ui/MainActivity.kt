@@ -301,6 +301,7 @@ private fun IconEditorApp(
                                     InfoEditPage(
                                         metadata = viewModel.metadata,
                                         selectedTab = infoTab,
+                                        onSelectedTab = { infoTab = it },
                                         contentPadding = contentPadding,
                                         onSaveMtz = viewModel::saveMtzInfo,
                                         onSaveModule = viewModel::saveModuleInfo,

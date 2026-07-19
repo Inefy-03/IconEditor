@@ -21,10 +21,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.gestures.ScrollScope
-import androidx.compose.foundation.gestures.TargetedFlingBehavior
 import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.PagerDefaults
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -144,10 +141,8 @@ fun RootPagerContent(
     projectsPage: @Composable () -> Unit,
     settingsPage: @Composable () -> Unit,
 ) {
-    val flingBehavior = rememberRootPagerFlingBehavior(pagerState)
     HorizontalPager(
         state = pagerState,
-        flingBehavior = flingBehavior,
         overscrollEffect = null,
         modifier = Modifier
             .fillMaxSize()
@@ -173,31 +168,6 @@ fun RootPagerContent(
         }
     }
 }
-
-@Composable
-private fun rememberRootPagerFlingBehavior(
-    pagerState: PagerState,
-): TargetedFlingBehavior {
-    val delegate = PagerDefaults.flingBehavior(
-        state = pagerState,
-        snapPositionalThreshold = 0.5f,
-    )
-    return remember(delegate) {
-        object : TargetedFlingBehavior {
-            override suspend fun ScrollScope.performFling(
-                initialVelocity: Float,
-                onRemainingDistanceUpdated: (Float) -> Unit,
-            ): Float = delegate.run {
-                this@performFling.performFling(
-                    initialVelocity = initialVelocity * RootPagerVelocityMultiplier,
-                    onRemainingDistanceUpdated = onRemainingDistanceUpdated,
-                )
-            }
-        }
-    }
-}
-
-private const val RootPagerVelocityMultiplier = 3f
 
 fun Screen.isRoot(): Boolean = this == Screen.Projects || this == Screen.Settings
 
