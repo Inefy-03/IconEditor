@@ -1,19 +1,40 @@
 package com.bocchi.iconeditor.data
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import com.bocchi.iconeditor.R
+import com.bocchi.iconeditor.data.sync.ProjectSyncInventory
+import com.bocchi.iconeditor.data.sync.ProjectSyncInventoryBuilder
+import com.bocchi.iconeditor.data.sync.ProjectSyncPackager
+import com.bocchi.iconeditor.model.ApkInfo
 import com.bocchi.iconeditor.model.AppSettings
 import com.bocchi.iconeditor.model.ExportFormat
+import com.bocchi.iconeditor.model.ExportProgress
+import com.bocchi.iconeditor.model.ExportPhase
 import com.bocchi.iconeditor.model.IconAsset
+import com.bocchi.iconeditor.model.IconImportCandidate
+import com.bocchi.iconeditor.model.IconImportMode
+import com.bocchi.iconeditor.model.IconImportPreview
+import com.bocchi.iconeditor.model.MaskLayerImportCandidate
+import com.bocchi.iconeditor.model.MaskLayerImportPreview
+import com.bocchi.iconeditor.model.IconMappingEntry
+import com.bocchi.iconeditor.model.IconMappingIndex
 import com.bocchi.iconeditor.model.IconPreferences
+import com.bocchi.iconeditor.model.IconUndoMeta
 import com.bocchi.iconeditor.model.ProjectIndex
 import com.bocchi.iconeditor.model.ProjectMetadata
 import com.bocchi.iconeditor.model.ProjectSummary
 import com.bocchi.iconeditor.model.SourceType
+import com.bocchi.iconeditor.model.TrashEntry
+import com.bocchi.iconeditor.model.TrashIndex
+import com.bocchi.iconeditor.model.ImportPhase
+import com.bocchi.iconeditor.model.ImportProgress
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
+import java.io.FileOutputStream
 import java.util.Base64
 import java.util.UUID
 
@@ -23,13 +44,20 @@ class ProjectRepository(private val context: Context) {
         ignoreUnknownKeys = true
         encodeDefaults = true
     }
+    private val apkImporter = ApkIconPackImporter(context)
+    private val apkExporter = ApkIconPackExporter(context)
+    private val maskLayerExtractor = MaskLayerExtractor(context)
 
     private val root: File = File(context.filesDir, "projects")
     private val indexFile: File = File(root, "index.json")
     private val settingsFile: File = File(context.filesDir, "settings.json")
+    private val trashRoot: File = File(context.filesDir, "trash")
+    private val trashIndexFile: File = File(trashRoot, "index.json")
+    private val iconUndoRoot: File = File(context.cacheDir, "icon-undo")
 
     init {
         root.mkdirs()
+        trashRoot.mkdirs()
     }
 
     fun loadProjects(): List<ProjectSummary> = readJson(indexFile, ProjectIndex()).projects
@@ -57,30 +85,82 @@ class ProjectRepository(private val context: Context) {
         return project
     }
 
-    fun importProject(uri: Uri, displayName: String): ProjectSummary {
-        val extension = displayName.substringAfterLast('.', "").lowercase()
-        val sourceType = when (extension) {
-            "mtz" -> SourceType.Mtz
-            "zip" -> SourceType.Module
-            else -> throw InvalidProjectArchiveException()
-        }
-        val project = createProject(displayName.substringBeforeLast('.').ifBlank { context.getString(R.string.imported_project) })
-            .copy(sourceType = sourceType, sourceFileName = displayName)
+    /** Create a local shell with the peer's project id/name if missing (for LAN sync bootstrap). */
+    fun ensureProject(summary: ProjectSummary): ProjectSummary {
+        loadProjects().firstOrNull { it.id == summary.id }?.let { return it }
+        val project = summary.copy(
+            name = summary.name.ifBlank { context.getString(R.string.new_project) },
+            dirty = false,
+        )
+        projectDir(project.id).mkdirs()
+        workDir(project.id).mkdirs()
+        sourceDir(project.id).mkdirs()
+        sourceExtractDir(project.id).mkdirs()
+        ArchiveService.createDefaultWorkspace(workDir(project.id))
+        ArchiveService.createDefaultWorkspace(sourceExtractDir(project.id))
+        saveMetadata(project.id, ProjectMetadata())
+        saveIconPreferences(project.id, IconPreferences())
+        updateProject(project)
+        return project
+    }
+
+    fun importProject(
+        uri: Uri,
+        displayName: String,
+        onProgress: (ImportProgress) -> Unit = {},
+    ): ProjectSummary {
+        val resolvedName = ImportSourceDetector.resolveDisplayName(context, uri)
+        val sourceType = ImportSourceDetector.detect(context, uri, resolvedName)
+        val project = createProject(resolvedName.substringBeforeLast('.').ifBlank { context.getString(R.string.imported_project) })
+            .copy(sourceType = sourceType, sourceFileName = resolvedName)
         return try {
-            val target = File(sourceDir(project.id), displayName)
+            onProgress(ImportProgress(ImportPhase.Copying))
+            val target = File(sourceDir(project.id), resolvedName)
             context.contentResolver.openInputStream(uri)?.use { input ->
                 target.outputStream().use { output -> input.copyTo(output) }
             } ?: error(context.getString(R.string.error_read_import))
-            if (sourceType == SourceType.Module && !ArchiveService.hasTopLevelIconsEntry(target)) {
-                throw InvalidProjectArchiveException()
+            when (sourceType) {
+                SourceType.Module -> {
+                    onProgress(ImportProgress(ImportPhase.Extracting))
+                    if (!ArchiveService.hasTopLevelIconsEntry(target)) {
+                        throw InvalidProjectArchiveException()
+                    }
+                    val imported = try {
+                        ArchiveService.importArchive(target, sourceType, workDir(project.id), sourceExtractDir(project.id))
+                    } catch (error: InvalidArchivePathException) {
+                        error(context.getString(R.string.error_invalid_zip_path, error.entryName))
+                    }
+                    saveMetadata(project.id, imported.metadata)
+                    onProgress(ImportProgress(ImportPhase.Finishing))
+                    syncIconMapping(project.id)
+                }
+                SourceType.Mtz -> {
+                    onProgress(ImportProgress(ImportPhase.Extracting))
+                    val imported = try {
+                        ArchiveService.importArchive(target, sourceType, workDir(project.id), sourceExtractDir(project.id))
+                    } catch (error: InvalidArchivePathException) {
+                        error(context.getString(R.string.error_invalid_zip_path, error.entryName))
+                    }
+                    saveMetadata(project.id, imported.metadata)
+                    onProgress(ImportProgress(ImportPhase.Finishing))
+                    syncIconMapping(project.id)
+                }
+                SourceType.Apk -> {
+                    if (!apkImporter.hasAppfilter(target)) {
+                        throw InvalidIconPackApkException()
+                    }
+                    val imported = apkImporter.import(
+                        apkFile = target,
+                        workDir = workDir(project.id),
+                        sourceExtractDir = sourceExtractDir(project.id),
+                        onProgress = onProgress,
+                    )
+                    saveMetadata(project.id, imported.metadata)
+                    saveIconMapping(project.id, imported.mapping)
+                    onProgress(ImportProgress(ImportPhase.Finishing))
+                }
+                SourceType.Universal -> Unit
             }
-
-            val imported = try {
-                ArchiveService.importArchive(target, sourceType, workDir(project.id), sourceExtractDir(project.id))
-            } catch (error: InvalidArchivePathException) {
-                error(context.getString(R.string.error_invalid_zip_path, error.entryName))
-            }
-            saveMetadata(project.id, imported.metadata)
             saveIconPreferences(project.id, IconPreferences())
             updateProject(project.copy(updatedAt = System.currentTimeMillis()))
             project
@@ -91,13 +171,168 @@ class ProjectRepository(private val context: Context) {
     }
 
     fun deleteProject(id: String) {
-        projectDir(id).deleteRecursively()
+        moveProjectToTrash(id)
+    }
+
+    fun loadTrash(): List<TrashEntry> =
+        readJson(trashIndexFile, TrashIndex()).entries.sortedByDescending { it.deletedAt }
+
+    fun moveProjectToTrash(id: String) {
+        val project = loadProjects().firstOrNull { it.id == id } ?: return
+        val source = projectDir(id)
+        val dest = trashProjectDir(id)
+        if (dest.exists()) dest.deleteRecursively()
+        if (source.exists()) {
+            dest.parentFile?.mkdirs()
+            if (!source.renameTo(dest)) {
+                source.copyRecursively(dest, overwrite = true)
+                source.deleteRecursively()
+            }
+        }
         saveIndex(loadProjects().filterNot { it.id == id })
+        val trash = loadTrash().filterNot { it.project.id == id } +
+            TrashEntry(project = project, deletedAt = System.currentTimeMillis())
+        saveTrashIndex(trash)
+    }
+
+    fun restoreProjectFromTrash(id: String) {
+        val entry = loadTrash().firstOrNull { it.project.id == id }
+            ?: error(context.getString(R.string.trash_not_found))
+        if (loadProjects().any { it.id == id }) {
+            error(context.getString(R.string.trash_already_exists))
+        }
+        val source = trashProjectDir(id)
+        val dest = projectDir(id)
+        if (dest.exists()) dest.deleteRecursively()
+        if (source.exists()) {
+            dest.parentFile?.mkdirs()
+            if (!source.renameTo(dest)) {
+                source.copyRecursively(dest, overwrite = true)
+                source.deleteRecursively()
+            }
+        } else {
+            dest.mkdirs()
+            workDir(id).mkdirs()
+            ArchiveService.createDefaultWorkspace(workDir(id))
+        }
+        updateProject(entry.project.copy(updatedAt = System.currentTimeMillis()))
+        saveTrashIndex(loadTrash().filterNot { it.project.id == id })
+    }
+
+    fun purgeTrashProject(id: String) {
+        trashProjectDir(id).deleteRecursively()
+        saveTrashIndex(loadTrash().filterNot { it.project.id == id })
+    }
+
+    fun emptyTrash() {
+        loadTrash().forEach { trashProjectDir(it.project.id).deleteRecursively() }
+        saveTrashIndex(emptyList())
+    }
+
+    private fun saveTrashIndex(entries: List<TrashEntry>) {
+        writeJson(trashIndexFile, TrashIndex(entries))
+    }
+
+    private fun trashProjectDir(id: String) = File(trashRoot, id)
+
+    /**
+     * Snapshot icon package files + mapping/prefs snippets for one-level undo.
+     * @return undo token, or null if nothing to snapshot (new empty package).
+     */
+    fun beginIconUndoSnapshot(id: String, packageName: String, label: String): String {
+        clearIconUndoSnapshots()
+        val token = UUID.randomUUID().toString()
+        val dir = File(iconUndoRoot, token).also { it.mkdirs() }
+        val work = workDir(id)
+        val assets = ArchiveService.scanIconAssets(work).filter { it.packageName == packageName }
+        for (asset in assets) {
+            val src = File(work, asset.archivePath)
+            if (!src.isFile) continue
+            val dest = File(dir, asset.archivePath)
+            dest.parentFile?.mkdirs()
+            src.copyTo(dest, overwrite = true)
+        }
+        writeJson(
+            File(dir, "snapshot.json"),
+            IconUndoMeta(
+                projectId = id,
+                packageName = packageName,
+                label = label,
+                selectedVariant = loadIconPreferences(id).selectedVariants[packageName],
+                customAppName = loadIconPreferences(id).customAppNames[packageName],
+                mappingEntry = loadIconMapping(id).entries.firstOrNull { it.packageName == packageName },
+                archivePaths = assets.map { it.archivePath },
+            ),
+        )
+        return token
+    }
+
+    fun restoreIconUndoSnapshot(token: String, alsoRemovePackages: Collection<String> = emptyList()) {
+        val dir = File(iconUndoRoot, token)
+        val meta = readJson(File(dir, "snapshot.json"), IconUndoMeta())
+        require(meta.projectId.isNotBlank() && meta.packageName.isNotBlank()) {
+            context.getString(R.string.undo_unavailable)
+        }
+        val id = meta.projectId
+        val packageName = meta.packageName
+        val work = workDir(id)
+        val packagesToClear = (alsoRemovePackages + packageName).toSet()
+        for (asset in ArchiveService.scanIconAssets(work).filter { it.packageName in packagesToClear }) {
+            File(work, asset.archivePath).delete()
+        }
+        for (relative in meta.archivePaths) {
+            val src = File(dir, relative)
+            if (!src.isFile) continue
+            val dest = File(work, relative)
+            dest.parentFile?.mkdirs()
+            src.copyTo(dest, overwrite = true)
+        }
+        val prefs = loadIconPreferences(id)
+        var selected = prefs.selectedVariants.toMutableMap()
+        var customs = prefs.customAppNames.toMutableMap()
+        for (pkg in packagesToClear) {
+            selected.remove(pkg)
+            customs.remove(pkg)
+        }
+        if (meta.selectedVariant != null) selected[packageName] = meta.selectedVariant
+        if (meta.customAppName != null) customs[packageName] = meta.customAppName
+        saveIconPreferences(id, prefs.copy(selectedVariants = selected, customAppNames = customs))
+        val mapping = loadIconMapping(id)
+        val without = mapping.entries.filterNot { it.packageName in packagesToClear }
+        val restored = meta.mappingEntry?.let { without + it } ?: without
+        saveIconMapping(id, IconMappingIndex(restored))
+        syncIconMapping(id)
+        markDirty(id)
+        dir.deleteRecursively()
+    }
+
+    fun clearIconUndoSnapshots() {
+        if (iconUndoRoot.exists()) iconUndoRoot.deleteRecursively()
     }
 
     fun renameProject(id: String, name: String) {
         val trimmed = name.trim().ifBlank { context.getString(R.string.unnamed_project) }
-        updateProject(requireProject(id).copy(name = trimmed, updatedAt = System.currentTimeMillis()))
+        val project = requireProject(id)
+        updateProject(project.copy(name = trimmed, updatedAt = System.currentTimeMillis()))
+        syncProjectDisplayName(id, trimmed, project.sourceType)
+    }
+
+    private fun syncProjectDisplayName(id: String, name: String, sourceType: SourceType) {
+        val metadata = loadMetadata(id)
+        val updated = when (sourceType) {
+            SourceType.Mtz -> metadata.copy(mtz = metadata.mtz.copy(title = name))
+            SourceType.Module -> metadata.copy(module = metadata.module.copy(name = name))
+            SourceType.Apk -> metadata.copy(apk = metadata.apk.copy(label = name))
+            SourceType.Universal -> when {
+                metadata.mtz.title.isNotBlank() -> metadata.copy(mtz = metadata.mtz.copy(title = name))
+                metadata.module.name.isNotBlank() -> metadata.copy(module = metadata.module.copy(name = name))
+                metadata.apk.label.isNotBlank() -> metadata.copy(apk = metadata.apk.copy(label = name))
+                else -> metadata
+            }
+        }
+        if (updated != metadata) {
+            writeJson(metadataFile(id), updated)
+        }
     }
 
     fun requireProject(id: String): ProjectSummary = loadProjects().first { it.id == id }
@@ -115,6 +350,23 @@ class ProjectRepository(private val context: Context) {
         writeJson(preferencesFile(id), preferences)
     }
 
+    fun loadIconMapping(id: String): IconMappingIndex = readJson(iconMappingFile(id), IconMappingIndex())
+
+    fun saveIconMapping(id: String, mapping: IconMappingIndex) {
+        writeJson(iconMappingFile(id), mapping)
+    }
+
+    fun syncIconMapping(id: String) {
+        val icons = loadIcons(id)
+        val existing = loadIconMapping(id)
+        val mapping = if (existing.entries.isEmpty()) {
+            IconMappingBridge.buildDefaultMappings(context, icons)
+        } else {
+            IconMappingBridge.mergeMappingsWithIcons(existing, icons, context.packageManager)
+        }
+        saveIconMapping(id, mapping)
+    }
+
     fun loadIcons(id: String): List<IconAsset> = ArchiveService.scanIconAssets(workDir(id))
 
     fun iconFile(id: String, asset: IconAsset): File = File(workDir(id), asset.archivePath)
@@ -125,6 +377,58 @@ class ProjectRepository(private val context: Context) {
         context.contentResolver.openInputStream(uri)?.use { input ->
             target.outputStream().use { output -> input.copyTo(output) }
         } ?: error(context.getString(R.string.error_read_icon))
+        markDirty(id)
+    }
+
+    fun apkLauncherIconFile(id: String): File? =
+        File(workDir(id), ApkPackAssets.LAUNCHER_ICON_PATH).takeIf { it.isFile }
+
+    fun apkMaskLayerFile(id: String, layer: ApkPackAssets.MaskLayer): File? {
+        migrateLegacyMaskIfNeeded(id)
+        return File(workDir(id), layer.relativePath).takeIf { it.isFile }
+    }
+
+    fun setApkLauncherIcon(id: String, uri: Uri) {
+        writeApkPngAsset(id, ApkPackAssets.LAUNCHER_ICON_PATH, uri)
+    }
+
+    fun setApkMaskLayer(id: String, layer: ApkPackAssets.MaskLayer, uri: Uri) {
+        writeApkPngAsset(id, layer.relativePath, uri)
+        if (layer == ApkPackAssets.MaskLayer.Mask) {
+            File(workDir(id), ApkPackAssets.LEGACY_MASK_PATH).delete()
+        }
+    }
+
+    fun clearApkLauncherIcon(id: String) {
+        File(workDir(id), ApkPackAssets.LAUNCHER_ICON_PATH).delete()
+        markDirty(id)
+    }
+
+    fun clearApkMaskLayer(id: String, layer: ApkPackAssets.MaskLayer) {
+        File(workDir(id), layer.relativePath).delete()
+        if (layer == ApkPackAssets.MaskLayer.Mask) {
+            File(workDir(id), ApkPackAssets.LEGACY_MASK_PATH).delete()
+        }
+        markDirty(id)
+    }
+
+    private fun migrateLegacyMaskIfNeeded(id: String) {
+        val legacy = File(workDir(id), ApkPackAssets.LEGACY_MASK_PATH)
+        val target = File(workDir(id), ApkPackAssets.MaskLayer.Mask.relativePath)
+        if (legacy.isFile && !target.isFile) {
+            target.parentFile?.mkdirs()
+            legacy.copyTo(target, overwrite = false)
+        }
+    }
+
+    private fun writeApkPngAsset(id: String, relativePath: String, uri: Uri) {
+        val target = File(workDir(id), relativePath)
+        target.parentFile?.mkdirs()
+        val bitmap = context.contentResolver.openInputStream(uri)?.use(BitmapFactory::decodeStream)
+            ?: error(context.getString(R.string.error_read_icon))
+        FileOutputStream(target).use { output ->
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)
+        }
         markDirty(id)
     }
 
@@ -148,6 +452,7 @@ class ProjectRepository(private val context: Context) {
             target.outputStream().use { output -> input.copyTo(output) }
         } ?: error(context.getString(R.string.error_read_icon))
         markDirty(id)
+        syncIconMapping(id)
         return variantKey
     }
 
@@ -170,26 +475,438 @@ class ProjectRepository(private val context: Context) {
     fun deleteIcon(id: String, asset: IconAsset) {
         File(workDir(id), asset.archivePath).delete()
         markDirty(id)
+        syncIconMapping(id)
     }
 
-    fun exportProject(id: String, format: ExportFormat, target: Uri) {
+    fun renameIconPackage(id: String, from: String, to: String) {
+        ArchiveService.renameIconPackage(workDir(id), from, to)
+        markDirty(id)
+        // Remap selected variants and mapping package key are handled by callers;
+        // sync rebuilds entries for on-disk icons while preserving aliases of remaining keys.
+        val existing = loadIconMapping(id)
+        val remapped = IconMappingIndex(
+            entries = existing.entries.map { entry ->
+                if (entry.packageName == from) {
+                    entry.copy(
+                        packageName = to,
+                        components = entry.components.map { component ->
+                            val pkg = IconMappingBridge.parseComponentInfo(component)?.first
+                            if (pkg == from) {
+                                IconMappingBridge.fallbackComponent(to)
+                            } else {
+                                component
+                            }
+                        }.distinct(),
+                    )
+                } else {
+                    entry
+                }
+            },
+        )
+        saveIconMapping(id, remapped)
+        syncIconMapping(id)
+    }
+
+    fun updateIconAliasPackageNames(id: String, packageName: String, aliases: List<String>) {
+        val normalized = IconMappingBridge.normalizeAliasPackageNames(aliases, packageName)
+        syncIconMapping(id)
+        val mapping = loadIconMapping(id)
+        val updated = IconMappingIndex(
+            entries = mapping.entries.map { entry ->
+                if (entry.packageName == packageName) {
+                    entry.copy(aliasPackageNames = normalized)
+                } else {
+                    entry
+                }
+            },
+        )
+        saveIconMapping(id, updated)
+    }
+
+    fun previewIconsFromPack(
+        projectId: String,
+        uri: Uri,
+        onProgress: (ImportProgress) -> Unit = {},
+    ): IconImportPreview {
+        requireProject(projectId)
+        onProgress(ImportProgress(ImportPhase.Copying))
+        val displayName = ImportSourceDetector.resolveDisplayName(context, uri)
+        val sourceType = ImportSourceDetector.detect(context, uri, displayName)
+        val stagingId = UUID.randomUUID().toString()
+        val stagingRoot = iconImportStagingRoot(stagingId).also { it.mkdirs() }
+        return try {
+            val sourceFile = File(stagingRoot, displayName)
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                sourceFile.outputStream().use { output -> input.copyTo(output) }
+            } ?: error(context.getString(R.string.error_read_import))
+
+            val stagingWork = File(stagingRoot, "work")
+            val stagingExtract = File(stagingRoot, "extract")
+            val incomingMapping = when (sourceType) {
+                SourceType.Module -> {
+                    onProgress(ImportProgress(ImportPhase.Extracting))
+                    if (!ArchiveService.hasTopLevelIconsEntry(sourceFile)) {
+                        throw InvalidProjectArchiveException()
+                    }
+                    try {
+                        ArchiveService.importArchive(sourceFile, sourceType, stagingWork, stagingExtract)
+                    } catch (error: InvalidArchivePathException) {
+                        error(context.getString(R.string.error_invalid_zip_path, error.entryName))
+                    }
+                    IconMappingIndex()
+                }
+                SourceType.Mtz -> {
+                    onProgress(ImportProgress(ImportPhase.Extracting))
+                    try {
+                        ArchiveService.importArchive(sourceFile, sourceType, stagingWork, stagingExtract)
+                    } catch (error: InvalidArchivePathException) {
+                        error(context.getString(R.string.error_invalid_zip_path, error.entryName))
+                    }
+                    IconMappingIndex()
+                }
+                SourceType.Apk -> {
+                    if (!apkImporter.hasAppfilter(sourceFile)) {
+                        throw InvalidIconPackApkException()
+                    }
+                    val imported = apkImporter.import(
+                        apkFile = sourceFile,
+                        workDir = stagingWork,
+                        sourceExtractDir = stagingExtract,
+                        onProgress = onProgress,
+                    )
+                    imported.mapping
+                }
+                SourceType.Universal -> error(context.getString(R.string.error_read_import))
+            }
+            saveStagedMapping(stagingId, incomingMapping)
+
+            onProgress(ImportProgress(ImportPhase.Finishing))
+            val incomingIcons = ArchiveService.scanIconAssets(stagingWork)
+            val primaryByPackage = incomingIcons
+                .groupBy { it.packageName }
+                .mapValues { (_, assets) ->
+                    assets.minWith(
+                        compareBy<IconAsset> {
+                            val suffix = it.variantKey.removePrefix(it.packageName)
+                            if (suffix.isEmpty()) 0 else suffix.removePrefix("_").toIntOrNull() ?: Int.MAX_VALUE
+                        }.thenBy { it.variantKey },
+                    )
+                }
+            if (primaryByPackage.isEmpty()) {
+                throw InvalidProjectArchiveException()
+            }
+            val existingPackages = loadIcons(projectId).map { it.packageName }.toSet()
+            val pm = context.packageManager
+            val items = primaryByPackage.keys.sorted().map { packageName ->
+                val asset = primaryByPackage.getValue(packageName)
+                val installedName = runCatching {
+                    val info = pm.getApplicationInfo(packageName, 0)
+                    pm.getApplicationLabel(info).toString()
+                }.getOrNull()
+                IconImportCandidate(
+                    packageName = packageName,
+                    appName = installedName?.takeIf { it.isNotBlank() } ?: packageName,
+                    iconArchivePath = asset.archivePath,
+                    conflict = packageName in existingPackages,
+                    selected = true,
+                )
+            }
+            IconImportPreview(
+                stagingId = stagingId,
+                sourceType = sourceType,
+                displayName = displayName,
+                items = items,
+            )
+        } catch (error: Throwable) {
+            discardIconImportStaging(stagingId)
+            throw error
+        }
+    }
+
+    fun applyIconImport(
+        projectId: String,
+        preview: IconImportPreview,
+        mode: IconImportMode,
+        selectedPackages: Set<String>,
+        onProgress: (ImportProgress) -> Unit = {},
+    ) {
+        requireProject(projectId)
+        val stagingWork = File(iconImportStagingRoot(preview.stagingId), "work")
+        if (!stagingWork.isDirectory) {
+            error(context.getString(R.string.icon_import_staging_missing))
+        }
+        onProgress(ImportProgress(ImportPhase.Copying))
+        val targetWork = workDir(projectId)
+        val targetIconRoot = File(targetWork, "icons/res/drawable-xxhdpi").also { it.mkdirs() }
+        val incomingIcons = ArchiveService.scanIconAssets(stagingWork)
+        val incomingByPackage = incomingIcons.groupBy { it.packageName }
+        val existingByPackage = loadIcons(projectId).groupBy { it.packageName }
+        val packagesToApply = when (mode) {
+            IconImportMode.Overwrite -> selectedPackages.filter { it in incomingByPackage }
+            IconImportMode.AddOnly -> selectedPackages.filter {
+                it in incomingByPackage && it !in existingByPackage
+            }
+        }.sorted()
+        if (packagesToApply.isEmpty()) {
+            error(context.getString(R.string.icon_import_nothing_selected))
+        }
+        val total = packagesToApply.size
+        packagesToApply.forEachIndexed { index, packageName ->
+            onProgress(ImportProgress(ImportPhase.ParsingIcons, current = index + 1, total = total))
+            existingByPackage[packageName].orEmpty().forEach { asset ->
+                File(targetWork, asset.archivePath).delete()
+            }
+            incomingByPackage[packageName].orEmpty().forEach { asset ->
+                val source = File(stagingWork, asset.archivePath)
+                if (!source.isFile) return@forEach
+                val target = File(targetIconRoot, source.name)
+                source.copyTo(target, overwrite = true)
+            }
+        }
+
+        onProgress(ImportProgress(ImportPhase.Finishing))
+        val incomingMapping = loadStagedMapping(preview.stagingId)
+        val preferred = IconMappingBridge.preferIncomingMappings(
+            existing = loadIconMapping(projectId),
+            incoming = incomingMapping,
+            packages = packagesToApply.toSet(),
+        )
+        val synced = IconMappingBridge.mergeMappingsWithIcons(
+            existing = preferred,
+            icons = loadIcons(projectId),
+            pm = context.packageManager,
+        )
+        saveIconMapping(projectId, synced)
+        markDirty(projectId)
+        discardIconImportStaging(preview.stagingId)
+    }
+
+    fun iconImportCandidateFile(stagingId: String, iconArchivePath: String): File =
+        File(iconImportStagingRoot(stagingId), "work/$iconArchivePath")
+
+    fun discardIconImportStaging(stagingId: String) {
+        runCatching { iconImportStagingRoot(stagingId).deleteRecursively() }
+    }
+
+    fun previewMaskLayersFromPack(
+        projectId: String,
+        uri: Uri,
+        onProgress: (ImportProgress) -> Unit = {},
+    ): MaskLayerImportPreview {
+        requireProject(projectId)
+        onProgress(ImportProgress(ImportPhase.Copying))
+        val displayName = ImportSourceDetector.resolveDisplayName(context, uri)
+        val sourceType = ImportSourceDetector.detect(context, uri, displayName)
+        val stagingId = UUID.randomUUID().toString()
+        val stagingRoot = maskImportStagingRoot(stagingId).also { it.mkdirs() }
+        return try {
+            val sourceFile = File(stagingRoot, displayName)
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                sourceFile.outputStream().use { output -> input.copyTo(output) }
+            } ?: error(context.getString(R.string.error_read_import))
+
+            val layersDir = File(stagingRoot, "layers").also { it.mkdirs() }
+            onProgress(ImportProgress(ImportPhase.Extracting))
+            val extracted = when (sourceType) {
+                SourceType.Apk -> maskLayerExtractor.extractFromApk(sourceFile, layersDir)
+                SourceType.Module -> {
+                    if (!ArchiveService.hasTopLevelIconsEntry(sourceFile)) {
+                        throw InvalidProjectArchiveException()
+                    }
+                    val stagingWork = File(stagingRoot, "work")
+                    val stagingExtract = File(stagingRoot, "extract")
+                    try {
+                        ArchiveService.importArchive(sourceFile, sourceType, stagingWork, stagingExtract)
+                    } catch (error: InvalidArchivePathException) {
+                        error(context.getString(R.string.error_invalid_zip_path, error.entryName))
+                    }
+                    maskLayerExtractor.extractFromWorkDir(stagingWork, layersDir)
+                }
+                SourceType.Mtz -> {
+                    val stagingWork = File(stagingRoot, "work")
+                    val stagingExtract = File(stagingRoot, "extract")
+                    try {
+                        ArchiveService.importArchive(sourceFile, sourceType, stagingWork, stagingExtract)
+                    } catch (error: InvalidArchivePathException) {
+                        error(context.getString(R.string.error_invalid_zip_path, error.entryName))
+                    }
+                    maskLayerExtractor.extractFromWorkDir(stagingWork, layersDir)
+                }
+                SourceType.Universal -> error(context.getString(R.string.error_read_import))
+            }
+            if (extracted.isEmpty()) {
+                throw NoMaskLayersFoundException()
+            }
+            onProgress(ImportProgress(ImportPhase.Finishing))
+            val items = ApkPackAssets.MaskLayer.entries.map { layer ->
+                val found = layer in extracted
+                MaskLayerImportCandidate(
+                    layerName = layer.resourceName,
+                    found = found,
+                    conflict = found && apkMaskLayerFile(projectId, layer) != null,
+                    selected = found,
+                )
+            }
+            MaskLayerImportPreview(
+                stagingId = stagingId,
+                sourceType = sourceType,
+                displayName = displayName,
+                items = items,
+            )
+        } catch (error: Throwable) {
+            discardMaskImportStaging(stagingId)
+            throw error
+        }
+    }
+
+    fun applyMaskLayerImport(
+        projectId: String,
+        preview: MaskLayerImportPreview,
+        selectedLayers: Set<String>,
+        onProgress: (ImportProgress) -> Unit = {},
+    ) {
+        requireProject(projectId)
+        val layersDir = File(maskImportStagingRoot(preview.stagingId), "layers")
+        if (!layersDir.isDirectory) {
+            error(context.getString(R.string.mask_import_staging_missing))
+        }
+        onProgress(ImportProgress(ImportPhase.Copying))
+        var imported = 0
+        ApkPackAssets.MaskLayer.entries.forEach { layer ->
+            if (layer.resourceName !in selectedLayers) return@forEach
+            val source = File(layersDir, "${layer.resourceName}.png")
+            if (!source.isFile) return@forEach
+            val target = File(workDir(projectId), layer.relativePath)
+            target.parentFile?.mkdirs()
+            source.copyTo(target, overwrite = true)
+            if (layer == ApkPackAssets.MaskLayer.Mask) {
+                File(workDir(projectId), ApkPackAssets.LEGACY_MASK_PATH).delete()
+            }
+            imported++
+        }
+        if (imported == 0) {
+            error(context.getString(R.string.mask_import_nothing_selected))
+        }
+        markDirty(projectId)
+        onProgress(ImportProgress(ImportPhase.Finishing))
+        discardMaskImportStaging(preview.stagingId)
+    }
+
+    fun maskImportLayerFile(stagingId: String, layerName: String): File? =
+        File(maskImportStagingRoot(stagingId), "layers/$layerName.png").takeIf { it.isFile }
+
+    fun discardMaskImportStaging(stagingId: String) {
+        runCatching { maskImportStagingRoot(stagingId).deleteRecursively() }
+    }
+
+    fun exportProject(
+        id: String,
+        format: ExportFormat,
+        target: Uri,
+        onProgress: (ExportProgress) -> Unit = {},
+    ) {
+        val reporter = ExportProgressReporter(onProgress)
         val project = requireProject(id)
-        val metadata = loadMetadata(id)
+        val formatLabel = when (format) {
+            ExportFormat.Mtz -> "MTZ"
+            ExportFormat.ModuleZip -> "Module"
+            ExportFormat.Apk -> "APK"
+        }
+        reporter.update(
+            phase = ExportPhase.Preparing,
+            log = "开始导出 $formatLabel：${project.name}",
+        )
+        val metadata = resolveExportMetadata(id, format, persist = true)
+        if (format == ExportFormat.Apk) {
+            reporter.log(
+                "版本号已递增：${metadata.apk.versionName} (${metadata.apk.versionCode})",
+            )
+        }
+        reporter.log("校验导出信息")
         validateForExport(format, metadata).takeIf { it.isNotEmpty() }?.let {
             error(it.joinToString("\n"))
         }
-        context.contentResolver.openOutputStream(target)?.use { output ->
-            ArchiveService.exportArchive(
-                metadata = metadata,
-                workDir = workDir(id),
-                format = format,
-                templateFiles = loadArchiveTemplate(format),
-                iconsTemplate = loadIconsTemplate(),
-                sourceArchive = sameFormatSourceArchive(project, format),
-                output = output,
-            )
-        } ?: error(context.getString(R.string.error_create_export))
+        val icons = loadIcons(id)
+        reporter.log("已加载 ${icons.size} 个图标资源")
+        val apkMapping = if (format == ExportFormat.Apk) {
+            reporter.update(detail = "生成 APK 映射")
+            reporter.log("生成 APK 图标映射")
+            IconMappingBridge.prepareApkExportMapping(context, icons, loadIconMapping(id)).also {
+                saveIconMapping(id, it)
+                reporter.log("映射条目：${it.entries.size}")
+            }
+        } else {
+            syncIconMapping(id)
+            IconMappingIndex()
+        }
+        reporter.update(phase = ExportPhase.WritingArchive, detail = "写入目标文件")
+        reporter.log("打开导出目标")
+        try {
+            context.contentResolver.openOutputStream(target, "w")?.use { output ->
+                when (format) {
+                    ExportFormat.Mtz, ExportFormat.ModuleZip -> {
+                        reporter.log("打包 $formatLabel 归档")
+                        ArchiveService.exportArchive(
+                            metadata = metadata,
+                            workDir = workDir(id),
+                            format = format,
+                            templateFiles = loadArchiveTemplate(format),
+                            iconsTemplate = loadIconsTemplate(),
+                            sourceArchive = sameFormatSourceArchive(project, format),
+                            output = output,
+                            reporter = reporter,
+                        )
+                    }
+                    ExportFormat.Apk -> apkExporter.export(
+                        apkInfo = metadata.apk,
+                        workDir = workDir(id),
+                        mapping = apkMapping,
+                        icons = icons,
+                        sourceApk = sameFormatSourceArchive(project, format),
+                        output = output,
+                        reporter = reporter,
+                    )
+                }
+                reporter.log("写入完成")
+            } ?: error(context.getString(R.string.error_create_export))
+            ExportDirectoryHelper.finalizeExportIfNeeded(context, target)
+        } catch (error: Exception) {
+            ExportDirectoryHelper.abortPendingExport(context, target)
+            throw error
+        }
+        reporter.update(phase = ExportPhase.Finishing, detail = "")
+        reporter.log("导出完成")
         updateProject(project.copy(dirty = false))
+    }
+
+    /**
+     * 将刚导出的 APK 复制到应用缓存并返回 FileProvider URI。
+     * 安装器直接读 Downloads/SAF 的 content URI 时，部分机型会缓存旧文件。
+     */
+    fun prepareInstallableApkUri(sourceUri: Uri): Uri {
+        val installDir = File(context.cacheDir, "apk-install").apply { mkdirs() }
+        installDir.listFiles()
+            ?.filter { it.isFile && it.extension.equals("apk", ignoreCase = true) }
+            ?.sortedByDescending { it.lastModified() }
+            ?.drop(KEEP_INSTALL_COPIES)
+            ?.forEach { runCatching { it.delete() } }
+        val target = File(installDir, "install-${System.currentTimeMillis()}.apk")
+        context.contentResolver.openInputStream(sourceUri)?.use { input ->
+            target.outputStream().use { output -> input.copyTo(output) }
+        } ?: error(context.getString(R.string.error_read_import))
+        require(target.isFile && target.length() > 0L) {
+            context.getString(R.string.export_apk_install_failed)
+        }
+        return androidx.core.content.FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.fileprovider",
+            target,
+        )
+    }
+
+    fun validateForExport(id: String, format: ExportFormat): List<String> {
+        val metadata = resolveExportMetadata(id, format, persist = false)
+        return validateForExport(format, metadata)
     }
 
     fun validateForExport(format: ExportFormat, metadata: ProjectMetadata): List<String> {
@@ -211,10 +928,39 @@ class ProjectRepository(private val context: Context) {
                     add(context.getString(R.string.validation_module_id_format))
                 }
             }
+            ExportFormat.Apk -> buildList {
+                if (metadata.apk.packageName.isBlank()) {
+                    add(context.getString(R.string.validation_apk_package))
+                } else if (!ApkInfoDefaults.isValidPackageName(metadata.apk.packageName)) {
+                    add(context.getString(R.string.validation_apk_package_format))
+                }
+                if (metadata.apk.label.isBlank()) {
+                    add(context.getString(R.string.validation_apk_label))
+                }
+                if (metadata.apk.versionName.isBlank()) {
+                    add(context.getString(R.string.validation_apk_version))
+                }
+            }
         }
     }
 
+    private fun resolveExportMetadata(id: String, format: ExportFormat, persist: Boolean): ProjectMetadata {
+        val metadata = loadMetadata(id)
+        if (format != ExportFormat.Apk) return metadata
+        val project = requireProject(id)
+        var resolvedApk = ApkInfoDefaults.resolve(project.name, metadata)
+        // 正式导出时自动递增版本号，校验预览不改动。
+        if (persist) {
+            resolvedApk = ApkInfoDefaults.bumpVersion(resolvedApk)
+        }
+        if (resolvedApk == metadata.apk) return metadata
+        val updated = metadata.copy(apk = resolvedApk)
+        if (persist) saveMetadata(id, updated)
+        return updated
+    }
+
     private fun loadArchiveTemplate(format: ExportFormat): Map<String, ByteArray> {
+        if (format == ExportFormat.Apk) return emptyMap()
         if (format == ExportFormat.Mtz) return mapOf("com.miui.home" to "test".encodeToByteArray())
         return ModuleTemplateFiles.associateWith { name ->
             context.assets.open("archive_templates/module/$name").use { it.readBytes() }
@@ -226,10 +972,119 @@ class ProjectRepository(private val context: Context) {
         return Base64.getMimeDecoder().decode(encoded)
     }
 
+    fun projectDirectory(id: String): File = projectDir(id)
+    fun workDirectory(id: String): File = workDir(id)
+    fun metadataPath(id: String): File = metadataFile(id)
+    fun preferencesPath(id: String): File = preferencesFile(id)
+    fun iconMappingPath(id: String): File = iconMappingFile(id)
+
+    /** Primary (first) icon file for a package, used by sync preview thumbnails. */
+    fun primaryIconFile(id: String, packageName: String): File? =
+        ArchiveService.listIconFiles(workDir(id), packageName).firstOrNull()
+
+    fun primaryIconBytes(id: String, packageName: String): ByteArray? =
+        primaryIconFile(id, packageName)?.takeIf { it.isFile }?.readBytes()
+
+    fun buildSyncInventory(id: String, resolveAppName: (String) -> String): ProjectSyncInventory {
+        val project = requireProject(id)
+        val prefs = loadIconPreferences(id)
+        return ProjectSyncInventoryBuilder.build(
+            project = project,
+            workDir = workDir(id),
+            metadataFile = metadataFile(id),
+            mappingFile = iconMappingFile(id),
+            preferencesFile = preferencesFile(id),
+            resolveAppName = { packageName ->
+                prefs.customAppNames[packageName] ?: resolveAppName(packageName)
+            },
+        )
+    }
+
+    fun packSyncProject(id: String, resolveAppName: (String) -> String, destination: File) {
+        val project = requireProject(id)
+        val inventory = buildSyncInventory(id, resolveAppName)
+        ProjectSyncPackager.packProject(projectDir(id), project, inventory, destination)
+    }
+
+    fun applySyncIconZip(id: String, packageName: String, zip: File, rebuildMapping: Boolean = true) {
+        ProjectSyncPackager.applyIconPackageZip(zip, workDir(id), packageName)
+        if (rebuildMapping) {
+            syncIconMapping(id)
+            markDirty(id)
+        }
+    }
+
+    fun applySyncIconBytes(id: String, packageName: String, data: ByteArray, rebuildMapping: Boolean = true) {
+        ProjectSyncPackager.applyIconPackageBytes(data, workDir(id), packageName)
+        if (rebuildMapping) {
+            syncIconMapping(id)
+            markDirty(id)
+        }
+    }
+
+    fun deleteSyncIconPackage(id: String, packageName: String) {
+        ArchiveService.deleteIconFiles(workDir(id), packageName)
+        val prefs = loadIconPreferences(id)
+        saveIconPreferences(
+            id,
+            prefs.copy(
+                selectedVariants = prefs.selectedVariants - packageName,
+                customAppNames = prefs.customAppNames - packageName,
+            ),
+        )
+        val mapping = loadIconMapping(id)
+        saveIconMapping(
+            id,
+            mapping.copy(entries = mapping.entries.filterNot { it.packageName == packageName }),
+        )
+        syncIconMapping(id)
+        markDirty(id)
+    }
+
+    /** Prefs/mapping cleanup after icon files were already deleted in batch sync. */
+    fun deleteSyncIconPackagesBatch(id: String, packageNames: Set<String>) {
+        if (packageNames.isEmpty()) return
+        val prefs = loadIconPreferences(id)
+        saveIconPreferences(
+            id,
+            prefs.copy(
+                selectedVariants = prefs.selectedVariants.filterKeys { it !in packageNames },
+                customAppNames = prefs.customAppNames.filterKeys { it !in packageNames },
+            ),
+        )
+        val mapping = loadIconMapping(id)
+        saveIconMapping(
+            id,
+            mapping.copy(entries = mapping.entries.filterNot { it.packageName in packageNames }),
+        )
+        syncIconMapping(id)
+        markDirty(id)
+    }
+
+    fun finalizeSyncProject(id: String) {
+        syncIconMapping(id)
+        markDirty(id)
+    }
+
+    fun packSyncMeta(id: String, destination: File) {
+        ProjectSyncPackager.packMeta(projectDir(id), workDir(id), destination)
+    }
+
+    fun applySyncMeta(id: String, zip: File) {
+        ProjectSyncPackager.applyMeta(zip, projectDir(id), workDir(id))
+        markDirty(id)
+    }
+
+    fun applySyncMetaBytes(id: String, data: ByteArray) {
+        ProjectSyncPackager.applyMetaBytes(data, projectDir(id), workDir(id))
+        markDirty(id)
+    }
+
     private fun sameFormatSourceArchive(project: ProjectSummary, format: ExportFormat): File? {
         val sameFormat = when (format) {
             ExportFormat.Mtz -> project.sourceType == SourceType.Mtz
             ExportFormat.ModuleZip -> project.sourceType == SourceType.Module
+            ExportFormat.Apk -> project.sourceType == SourceType.Apk
         }
         if (!sameFormat || project.sourceFileName.isBlank()) return null
         return File(sourceDir(project.id), project.sourceFileName).takeIf(File::isFile)
@@ -264,6 +1119,17 @@ class ProjectRepository(private val context: Context) {
     private fun workDir(id: String) = File(projectDir(id), "work")
     private fun metadataFile(id: String) = File(projectDir(id), "metadata.json")
     private fun preferencesFile(id: String) = File(projectDir(id), "preferences.json")
+    private fun iconMappingFile(id: String) = File(projectDir(id), "icon_mapping.json")
+    private fun iconImportStagingRoot(stagingId: String) = File(context.cacheDir, "icon-import/$stagingId")
+    private fun maskImportStagingRoot(stagingId: String) = File(context.cacheDir, "mask-import/$stagingId")
+    private fun stagedMappingFile(stagingId: String) = File(iconImportStagingRoot(stagingId), "mapping.json")
+
+    private fun saveStagedMapping(stagingId: String, mapping: IconMappingIndex) {
+        writeJson(stagedMappingFile(stagingId), mapping)
+    }
+
+    private fun loadStagedMapping(stagingId: String): IconMappingIndex =
+        readJson(stagedMappingFile(stagingId), IconMappingIndex())
 
     private inline fun <reified T> readJson(file: File, fallback: T): T {
         return runCatching {
@@ -277,6 +1143,7 @@ class ProjectRepository(private val context: Context) {
     }
 
     private companion object {
+        const val KEEP_INSTALL_COPIES = 3
         val ModuleTemplateFiles = listOf(
             "META-INF/com/google/android/update-binary",
             "META-INF/com/google/android/updater-script",

@@ -1,5 +1,10 @@
 package com.bocchi.iconeditor.ui.page
 
+import android.content.Intent
+import android.net.Uri
+import android.provider.DocumentsContract
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
@@ -21,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.bocchi.iconeditor.R
+import com.bocchi.iconeditor.data.ExportDirectoryHelper
 import com.bocchi.iconeditor.model.AppSettings
 import com.bocchi.iconeditor.model.ThemeMode
 import com.bocchi.iconeditor.ui.locale.AppLanguage
@@ -38,10 +44,35 @@ import top.yukonga.miuix.kmp.utils.overScrollVertical
 
 @Composable
 fun SettingsPage(
+    settings: AppSettings,
     contentPadding: PaddingValues = PaddingValues(top = 12.dp, bottom = 12.dp),
+    onSettings: (AppSettings) -> Unit,
     onTheme: () -> Unit,
+    onProjectSync: () -> Unit,
+    onTrash: () -> Unit,
     onAbout: () -> Unit,
 ) {
+    val context = LocalContext.current
+    val exportDirectoryLabel = remember(settings.exportDirectoryUri, context) {
+        ExportDirectoryHelper.displayLabel(context, settings)
+    }
+    val exportDirectoryLauncher = rememberLauncherForActivityResult(
+        contract = object : ActivityResultContracts.OpenDocumentTree() {
+            override fun createIntent(context: android.content.Context, input: Uri?): Intent =
+                super.createIntent(context, input).apply {
+                    putExtra(DocumentsContract.EXTRA_INITIAL_URI, ExportDirectoryHelper.defaultTreeInitialUri())
+                }
+        },
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        runCatching {
+            context.contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+            )
+        }
+        onSettings(settings.copy(exportDirectoryUri = uri.toString()))
+    }
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -63,6 +94,26 @@ fun SettingsPage(
         item { SmallTitle(stringResource(R.string.settings_other)) }
         item {
             PreferenceCard(bottom = 6.dp) {
+                ArrowPreference(
+                    title = stringResource(R.string.export_directory_title),
+                    summary = exportDirectoryLabel,
+                    onClick = { exportDirectoryLauncher.launch(null) },
+                )
+                if (settings.exportDirectoryUri.isNotBlank()) {
+                    ArrowPreference(
+                        title = stringResource(R.string.export_directory_reset),
+                        onClick = { onSettings(settings.copy(exportDirectoryUri = "")) },
+                    )
+                }
+                ArrowPreference(
+                    title = stringResource(R.string.screen_project_sync),
+                    onClick = onProjectSync,
+                )
+                ArrowPreference(
+                    title = stringResource(R.string.screen_trash),
+                    summary = stringResource(R.string.trash_settings_summary),
+                    onClick = onTrash,
+                )
                 ArrowPreference(
                     title = stringResource(R.string.about_title),
                     onClick = onAbout,

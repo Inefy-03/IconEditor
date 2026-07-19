@@ -1,6 +1,7 @@
 package com.bocchi.iconeditor.ui.page
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
@@ -56,6 +58,7 @@ import top.yukonga.miuix.kmp.icon.extended.GridView
 import top.yukonga.miuix.kmp.icon.extended.Info
 import top.yukonga.miuix.kmp.icon.extended.Remove
 import top.yukonga.miuix.kmp.icon.extended.Replace
+import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 
@@ -66,8 +69,14 @@ fun ProjectsPage(
     sortField: ProjectSortField = ProjectSortField.CreatedAt,
     contentPadding: PaddingValues = PaddingValues(12.dp),
     scrollToTopRequest: Int = 0,
+    syncServerRunning: Boolean = false,
+    syncLanAddress: String? = null,
+    syncServerPort: Int = 0,
+    onToggleSyncServer: (Boolean) -> Unit = {},
     onEditInfo: (ProjectSummary) -> Unit,
     onEditIcons: (ProjectSummary) -> Unit,
+    onSync: (ProjectSummary) -> Unit,
+    onRename: (ProjectSummary) -> Unit,
     onDelete: (ProjectSummary) -> Unit,
     onExport: (ProjectSummary) -> Unit,
 ) {
@@ -88,8 +97,17 @@ fun ProjectsPage(
                     .fillMaxSize()
                     .overScrollVertical(),
                 contentPadding = contentPadding,
+                verticalArrangement = Arrangement.spacedBy(12.dp),
                 overscrollEffect = null,
             ) {
+                item {
+                    SyncServerToggleCard(
+                        running = syncServerRunning,
+                        lanAddress = syncLanAddress,
+                        port = syncServerPort,
+                        onToggle = onToggleSyncServer,
+                    )
+                }
                 item {
                     EmptyState(
                         text = stringResource(R.string.empty_projects),
@@ -113,10 +131,55 @@ fun ProjectsPage(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             overscrollEffect = null,
         ) {
+            item(span = { GridItemSpan(maxLineSpan) }, key = "sync-server-toggle") {
+                SyncServerToggleCard(
+                    running = syncServerRunning,
+                    lanAddress = syncLanAddress,
+                    port = syncServerPort,
+                    onToggle = onToggleSyncServer,
+                )
+            }
             gridItems(sortedProjects, key = { it.id }) { project ->
-                ProjectCard(project, metadata[project.id] ?: ProjectMetadata(), onEditInfo, onEditIcons, onDelete, onExport)
+                ProjectCard(
+                    project,
+                    metadata[project.id] ?: ProjectMetadata(),
+                    onEditInfo,
+                    onEditIcons,
+                    onSync,
+                    onRename,
+                    onDelete,
+                    onExport,
+                )
             }
         }
+    }
+}
+
+@Composable
+private fun SyncServerToggleCard(
+    running: Boolean,
+    lanAddress: String?,
+    port: Int,
+    onToggle: (Boolean) -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        insideMargin = PaddingValues(0.dp),
+    ) {
+        SwitchPreference(
+            title = stringResource(R.string.sync_server_toggle),
+            summary = if (running) {
+                stringResource(
+                    R.string.sync_server_running,
+                    lanAddress ?: "0.0.0.0",
+                    port,
+                )
+            } else {
+                stringResource(R.string.sync_server_toggle_off)
+            },
+            checked = running,
+            onCheckedChange = onToggle,
+        )
     }
 }
 
@@ -143,6 +206,8 @@ fun ProjectCard(
     metadata: ProjectMetadata,
     onEditInfo: (ProjectSummary) -> Unit,
     onEditIcons: (ProjectSummary) -> Unit,
+    onSync: (ProjectSummary) -> Unit,
+    onRename: (ProjectSummary) -> Unit,
     onDelete: (ProjectSummary) -> Unit,
     onExport: (ProjectSummary) -> Unit,
 ) {
@@ -164,7 +229,9 @@ fun ProjectCard(
             ) {
                 Text(
                     text = displayTitle,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { onRename(project) },
                     style = MiuixTheme.textStyles.title4,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
@@ -212,6 +279,11 @@ fun ProjectCard(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             ProjectActionButton(
+                imageVector = MiuixIcons.Replace,
+                contentDescription = stringResource(R.string.action_rename),
+                onClick = { onRename(project) },
+            )
+            ProjectActionButton(
                 imageVector = MiuixIcons.Edit,
                 contentDescription = stringResource(R.string.action_edit_info),
                 onClick = { onEditInfo(project) },
@@ -221,9 +293,14 @@ fun ProjectCard(
                 contentDescription = stringResource(R.string.action_edit_icons),
                 onClick = { onEditIcons(project) },
             )
-            Spacer(Modifier.weight(1f))
             ProjectActionButton(
                 imageVector = MiuixIcons.Forward,
+                contentDescription = stringResource(R.string.action_sync),
+                onClick = { onSync(project) },
+            )
+            Spacer(Modifier.weight(1f))
+            ProjectActionButton(
+                imageVector = MiuixIcons.Download,
                 contentDescription = stringResource(R.string.action_export),
                 onClick = { onExport(project) },
             )
@@ -266,7 +343,8 @@ fun projectDisplayTitle(project: ProjectSummary, metadata: ProjectMetadata): Str
     return when (project.sourceType) {
         SourceType.Mtz -> metadata.mtz.title
         SourceType.Module -> metadata.module.name
-        SourceType.Universal -> metadata.mtz.title.ifBlank { metadata.module.name }
+        SourceType.Apk -> metadata.apk.label
+        SourceType.Universal -> metadata.mtz.title.ifBlank { metadata.module.name.ifBlank { metadata.apk.label } }
     }.ifBlank { project.name }
 }
 
@@ -274,7 +352,8 @@ fun projectDisplayVersion(project: ProjectSummary, metadata: ProjectMetadata): S
     return when (project.sourceType) {
         SourceType.Mtz -> metadata.mtz.version
         SourceType.Module -> metadata.module.version
-        SourceType.Universal -> metadata.mtz.version.ifBlank { metadata.module.version }
+        SourceType.Apk -> metadata.apk.versionName
+        SourceType.Universal -> metadata.mtz.version.ifBlank { metadata.module.version.ifBlank { metadata.apk.versionName } }
     }
 }
 
@@ -282,7 +361,8 @@ fun projectDisplayAuthor(project: ProjectSummary, metadata: ProjectMetadata): St
     return when (project.sourceType) {
         SourceType.Mtz -> metadata.mtz.author
         SourceType.Module -> metadata.module.author
-        SourceType.Universal -> metadata.mtz.author.ifBlank { metadata.module.author }
+        SourceType.Apk -> metadata.apk.author
+        SourceType.Universal -> metadata.mtz.author.ifBlank { metadata.module.author.ifBlank { metadata.apk.author } }
     }
 }
 

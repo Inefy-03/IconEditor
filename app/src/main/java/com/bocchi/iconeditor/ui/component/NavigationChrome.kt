@@ -96,6 +96,8 @@ enum class Screen : NavKey {
     Icons,
     ThemeSettings,
     About,
+    ProjectSync,
+    Trash,
 }
 
 @Composable
@@ -201,6 +203,8 @@ fun AppTopBar(
     onProjectSortField: (ProjectSortField) -> Unit = {},
     infoTab: InfoTab = InfoTab.Mtz,
     onInfoTab: (InfoTab) -> Unit = {},
+    onImportIcons: () -> Unit = {},
+    onAddIcon: () -> Unit = {},
 ) {
     var showIconSortMenu by remember { mutableStateOf(false) }
     var showIconOptionsMenu by remember { mutableStateOf(false) }
@@ -211,6 +215,8 @@ fun AppTopBar(
         Screen.Icons -> stringResource(R.string.screen_icon_edit)
         Screen.ThemeSettings -> stringResource(R.string.screen_theme_settings)
         Screen.About -> stringResource(R.string.about_title)
+        Screen.ProjectSync -> stringResource(R.string.screen_project_sync)
+        Screen.Trash -> stringResource(R.string.screen_trash)
     }
     if (screen == Screen.About) return
     TopAppBar(
@@ -275,11 +281,36 @@ fun AppTopBar(
                         ) {
                             ListPopupColumn {
                                 DropdownImpl(
-                                    item = DropdownItem(text = stringResource(R.string.show_local_apps)),
-                                    optionSize = IconFilterOptionCount,
-                                    isSelected = iconPreferences.showLocalApps,
+                                    item = DropdownItem(text = stringResource(R.string.action_add_icon)),
+                                    optionSize = IconOptionsMenuCount,
+                                    isSelected = false,
                                     index = 0,
                                     isFirst = true,
+                                    isLast = false,
+                                    onSelectedIndexChange = {
+                                        showIconOptionsMenu = false
+                                        onAddIcon()
+                                    },
+                                )
+                                DropdownImpl(
+                                    item = DropdownItem(text = stringResource(R.string.action_import_icons)),
+                                    optionSize = IconOptionsMenuCount,
+                                    isSelected = false,
+                                    index = 1,
+                                    isFirst = false,
+                                    isLast = false,
+                                    onSelectedIndexChange = {
+                                        showIconOptionsMenu = false
+                                        onImportIcons()
+                                    },
+                                )
+                                PopupGroupDivider()
+                                DropdownImpl(
+                                    item = DropdownItem(text = stringResource(R.string.show_local_apps)),
+                                    optionSize = IconOptionsMenuCount,
+                                    isSelected = iconPreferences.showLocalApps,
+                                    index = 2,
+                                    isFirst = false,
                                     isLast = false,
                                     onSelectedIndexChange = {
                                         onIconPreferences(
@@ -292,9 +323,9 @@ fun AppTopBar(
                                 )
                                 DropdownImpl(
                                     item = DropdownItem(text = stringResource(R.string.show_system_apps)),
-                                    optionSize = IconFilterOptionCount,
+                                    optionSize = IconOptionsMenuCount,
                                     isSelected = iconPreferences.showSystemApps,
-                                    index = 1,
+                                    index = 3,
                                     isFirst = false,
                                     isLast = false,
                                     onSelectedIndexChange = {
@@ -307,9 +338,9 @@ fun AppTopBar(
                                 PopupGroupDivider()
                                 DropdownImpl(
                                     item = DropdownItem(text = stringResource(R.string.only_show_multiple_styles)),
-                                    optionSize = IconFilterOptionCount,
+                                    optionSize = IconOptionsMenuCount,
                                     isSelected = iconPreferences.onlyShowMultipleStyles,
-                                    index = 2,
+                                    index = 4,
                                     isFirst = false,
                                     isLast = false,
                                     onSelectedIndexChange = {
@@ -324,9 +355,9 @@ fun AppTopBar(
                                 )
                                 DropdownImpl(
                                     item = DropdownItem(text = stringResource(R.string.only_show_unadapted_icons)),
-                                    optionSize = IconFilterOptionCount,
+                                    optionSize = IconOptionsMenuCount,
                                     isSelected = iconPreferences.onlyShowUnadaptedIcons,
-                                    index = 3,
+                                    index = 5,
                                     isFirst = false,
                                     isLast = true,
                                     onSelectedIndexChange = {
@@ -369,7 +400,8 @@ private fun InfoTabRow(
 ) {
     val mtzTitle = stringResource(R.string.tab_mtz_info)
     val moduleTitle = stringResource(R.string.tab_module_info)
-    val tabs = remember(mtzTitle, moduleTitle) { listOf(mtzTitle, moduleTitle) }
+    val apkTitle = stringResource(R.string.tab_apk_info)
+    val tabs = remember(mtzTitle, moduleTitle, apkTitle) { listOf(mtzTitle, moduleTitle, apkTitle) }
     TabRow(
         tabs = tabs,
         selectedTabIndex = selectedTab.ordinal,
@@ -559,7 +591,7 @@ private fun PopupGroupDivider() {
 }
 
 private const val IconSortOptionCount = 3
-private const val IconFilterOptionCount = 4
+private const val IconOptionsMenuCount = 6
 private const val ProjectSortOptionCount = 3
 
 @Composable

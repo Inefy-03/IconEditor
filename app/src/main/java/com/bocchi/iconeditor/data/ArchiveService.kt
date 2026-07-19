@@ -2,6 +2,7 @@ package com.bocchi.iconeditor.data
 
 import android.graphics.BitmapFactory
 import com.bocchi.iconeditor.model.ExportFormat
+import com.bocchi.iconeditor.model.ExportPhase
 import com.bocchi.iconeditor.model.IconAsset
 import com.bocchi.iconeditor.model.ModuleInfo
 import com.bocchi.iconeditor.model.MtzInfo
@@ -55,6 +56,7 @@ object ArchiveService {
                 createDefaultWorkspace(workDir)
                 copyDirectory(workDir, sourceExtractDir)
             }
+            SourceType.Apk -> error("APK import is handled by ApkIconPackImporter")
         }
 
         val metadata = when (sourceType) {
@@ -85,6 +87,7 @@ object ArchiveService {
                 )
             }
             SourceType.Universal -> ProjectMetadata()
+            SourceType.Apk -> error("APK import is handled by ApkIconPackImporter")
         }
         return ImportResult(metadata)
     }
@@ -119,8 +122,56 @@ object ArchiveService {
                     lastModified = file.lastModified(),
                 )
             }
+            .filter { it.packageName !in ApkPackAssets.MaskLayer.resourceNames }
             .sortedBy { it.packageName }
             .toList()
+    }
+
+    /** Fast package scan for sync inventory — size/mtime only, no image decode. */
+    fun scanIconAssetsLite(workDir: File): List<IconAsset> {
+        val iconRoot = File(workDir, "icons/res/drawable-xxhdpi")
+        if (!iconRoot.exists()) return emptyList()
+        return iconRoot.listFiles()
+            .orEmpty()
+            .asSequence()
+            .filter { it.isFile && it.extension.lowercase() in imageExtensions }
+            .map { file ->
+                val name = file.nameWithoutExtension
+                val packageName = name.removeVariantSuffix()
+                IconAsset(
+                    packageName = packageName,
+                    variantKey = name,
+                    archivePath = file.relativeTo(workDir).invariantSeparatorsPath,
+                    fileName = file.name,
+                    width = 0,
+                    height = 0,
+                    lastModified = file.lastModified(),
+                )
+            }
+            .filter { it.packageName !in ApkPackAssets.MaskLayer.resourceNames }
+            .sortedBy { it.packageName }
+            .toList()
+    }
+
+    /** Fast path for sync: list files for one package without decoding image bounds. */
+    fun listIconFiles(workDir: File, packageName: String): List<File> {
+        if (packageName.isBlank() || packageName in ApkPackAssets.MaskLayer.resourceNames) return emptyList()
+        val iconRoot = File(workDir, "icons/res/drawable-xxhdpi")
+        if (!iconRoot.isDirectory) return emptyList()
+        return iconRoot.listFiles()
+            .orEmpty()
+            .asSequence()
+            .filter { it.isFile && it.extension.lowercase() in imageExtensions }
+            .filter { it.nameWithoutExtension.removeVariantSuffix() == packageName }
+            .sortedWith(
+                compareBy<File> { variantOrder(it.nameWithoutExtension, packageName) }
+                    .thenBy { it.name },
+            )
+            .toList()
+    }
+
+    fun deleteIconFiles(workDir: File, packageName: String) {
+        listIconFiles(workDir, packageName).forEach { it.delete() }
     }
 
     fun normalizeIconVariants(
@@ -190,6 +241,57 @@ object ArchiveService {
         return packageName
     }
 
+    fun renameIconPackage(workDir: File, from: String, to: String) {
+        val oldPackage = from.trim()
+        val newPackage = to.trim()
+        if (oldPackage == newPackage) return
+        require(oldPackage.isNotEmpty() && newPackage.isNotEmpty()) { "包名不能为空" }
+        val assets = scanIconAssets(workDir)
+        require(assets.none { it.packageName == newPackage }) { "包名已存在：$newPackage" }
+        val toRename = assets.filter { it.packageName == oldPackage }
+            .sortedWith(
+                compareBy<IconAsset> { variantOrder(it.variantKey, oldPackage) }
+                    .thenBy { it.fileName },
+            )
+        if (toRename.isEmpty()) return
+        val iconRoot = File(workDir, "icons/res/drawable-xxhdpi")
+        val operationId = UUID.randomUUID().toString()
+        data class RenameMove(val source: File, val staged: File, val target: File)
+        val moves = toRename.mapIndexed { index, asset ->
+            val source = File(workDir, asset.archivePath)
+            val suffix = if (index == 0) "" else "_$index"
+            RenameMove(
+                source = source,
+                staged = File(iconRoot, ".iconeditor-rename-$operationId-$index.tmp"),
+                target = File(iconRoot, "$newPackage$suffix.${source.extension}"),
+            )
+        }
+        try {
+            moves.forEach { moveFile(it.source, it.staged) }
+        } catch (error: Throwable) {
+            moves.asReversed().forEach { move ->
+                if (move.staged.exists()) moveFile(move.staged, move.source)
+            }
+            throw error
+        }
+        try {
+            moves.forEach { move ->
+                if (move.target.exists()) move.target.delete()
+                moveFile(move.staged, move.target)
+            }
+        } catch (error: Throwable) {
+            moves.forEach { move ->
+                if (move.target.exists() && !move.staged.exists()) {
+                    moveFile(move.target, move.staged)
+                }
+            }
+            moves.forEach { move ->
+                if (move.staged.exists()) moveFile(move.staged, move.source)
+            }
+            throw error
+        }
+    }
+
     fun exportArchive(
         metadata: ProjectMetadata,
         workDir: File,
@@ -198,6 +300,7 @@ object ArchiveService {
         iconsTemplate: ByteArray,
         sourceArchive: File? = null,
         output: OutputStream,
+        reporter: ExportProgressReporter = ExportProgressReporter.NOOP,
     ) {
         when (format) {
             ExportFormat.Mtz -> exportMtz(
@@ -207,6 +310,7 @@ object ArchiveService {
                 iconsTemplate,
                 sourceArchive,
                 output,
+                reporter,
             )
             ExportFormat.ModuleZip -> exportModule(
                 metadata.module,
@@ -215,7 +319,9 @@ object ArchiveService {
                 iconsTemplate,
                 sourceArchive,
                 output,
+                reporter,
             )
+            ExportFormat.Apk -> error("APK export is handled by ApkIconPackExporter")
         }
     }
 
@@ -226,15 +332,18 @@ object ArchiveService {
         iconsTemplate: ByteArray,
         sourceArchive: File?,
         output: OutputStream,
+        reporter: ExportProgressReporter,
     ) {
+        reporter.log("写入 MTZ description.xml")
         exportFromBase(
             output = output,
             sourceArchive = sourceArchive,
             templateFiles = templateFiles,
             replacedEntries = setOf("description.xml", "icons"),
+            reporter = reporter,
         ) { zip, source ->
             zip.writeEntry("description.xml", buildMtzDescription(info))
-            zip.writeIconsArchive(workDir, source, iconsTemplate)
+            zip.writeIconsArchive(workDir, source, iconsTemplate, reporter)
         }
     }
 
@@ -245,18 +354,21 @@ object ArchiveService {
         iconsTemplate: ByteArray,
         sourceArchive: File?,
         output: OutputStream,
+        reporter: ExportProgressReporter,
     ) {
+        reporter.log("写入 Module 元数据")
         exportFromBase(
             output = output,
             sourceArchive = sourceArchive,
             templateFiles = templateFiles,
             replacedEntries = setOf("customize.sh", "module.prop", "icons"),
+            reporter = reporter,
         ) { zip, source ->
             val customizeBase = source?.readEntry("customize.sh")
                 ?: templateFiles.getValue("customize.sh")
             zip.writeEntry("customize.sh", mergeCustomize(customizeBase, info.installMessages))
             zip.writeEntry("module.prop", buildModuleProp(info).encodeToByteArray())
-            zip.writeIconsArchive(workDir, source, iconsTemplate)
+            zip.writeIconsArchive(workDir, source, iconsTemplate, reporter)
         }
     }
 
@@ -265,8 +377,14 @@ object ArchiveService {
         sourceArchive: File?,
         templateFiles: Map<String, ByteArray>,
         replacedEntries: Set<String>,
+        reporter: ExportProgressReporter,
         writeEditableEntries: (ZipOutputStream, ZipFile?) -> Unit,
     ) {
+        if (sourceArchive != null) {
+            reporter.log("基于源归档：${sourceArchive.name}")
+        } else {
+            reporter.log("使用内置模板文件")
+        }
         ZipOutputStream(output).use { zip ->
             if (sourceArchive != null) {
                 ZipFile(sourceArchive).use { source ->
@@ -393,7 +511,12 @@ object ArchiveService {
         appendLine("set_perm_recursive ${'$'}MODPATH 0 0 0755 0644")
     }
 
-    private fun buildIconsZip(workDir: File, baseIcons: File, output: File) {
+    private fun buildIconsZip(
+        workDir: File,
+        baseIcons: File,
+        output: File,
+        reporter: ExportProgressReporter = ExportProgressReporter.NOOP,
+    ) {
         ZipFile(baseIcons).use { source ->
             ZipOutputStream(output.outputStream().buffered()).use { zip ->
                 source.entries().asSequence().forEach { entry ->
@@ -403,13 +526,33 @@ object ArchiveService {
                 }
                 val editableIcons = File(workDir, "icons/$EditableIconDirectory")
                 if (editableIcons.exists()) {
-                    editableIcons.walkTopDown()
-                        .filter(File::isFile)
+                    val iconFiles = editableIcons.walkTopDown()
+                        .filter { it.isFile }
                         .sortedBy { it.relativeTo(editableIcons).invariantSeparatorsPath }
-                        .forEach { file ->
-                            val relative = file.relativeTo(editableIcons).invariantSeparatorsPath
-                            zip.writeStoredEntry("$EditableIconDirectory$relative", file)
+                        .toList()
+                    reporter.update(
+                        phase = ExportPhase.PackagingIcons,
+                        current = 0,
+                        total = iconFiles.size,
+                        detail = "打包 icons 模块",
+                        log = "打包 icons 模块（${iconFiles.size} 个文件）",
+                    )
+                    iconFiles.forEachIndexed { index, file ->
+                        val relative = file.relativeTo(editableIcons).invariantSeparatorsPath
+                        zip.writeStoredEntry("$EditableIconDirectory$relative", file)
+                        val current = index + 1
+                        if (current == 1 || current == iconFiles.size || current % 50 == 0) {
+                            reporter.update(
+                                phase = ExportPhase.PackagingIcons,
+                                current = current,
+                                total = iconFiles.size,
+                                detail = relative,
+                                log = "写入 icons $current/${iconFiles.size}：$relative",
+                            )
                         }
+                    }
+                } else {
+                    reporter.log("未找到可编辑图标目录")
                 }
             }
         }
@@ -481,20 +624,25 @@ object ArchiveService {
         workDir: File,
         source: ZipFile?,
         iconsTemplate: ByteArray,
+        reporter: ExportProgressReporter = ExportProgressReporter.NOOP,
     ) {
         val tempDir = Files.createTempDirectory(workDir.toPath(), "export-icons-").toFile()
         try {
             val baseIcons = File(tempDir, "base-icons.zip")
             val sourceEntry = source?.getEntry("icons")
             if (source != null && sourceEntry != null) {
+                reporter.log("从源归档读取 icons 模块")
                 source.getInputStream(sourceEntry).use { input ->
                     baseIcons.outputStream().buffered().use { output -> input.copyTo(output) }
                 }
             } else {
+                reporter.log("使用内置 icons 模板")
                 baseIcons.writeBytes(iconsTemplate)
             }
             val rebuiltIcons = File(tempDir, "icons.zip")
-            buildIconsZip(workDir, baseIcons, rebuiltIcons)
+            buildIconsZip(workDir, baseIcons, rebuiltIcons, reporter)
+            reporter.update(phase = ExportPhase.WritingArchive, detail = "写入 icons 条目")
+            reporter.log("将 icons 模块写入归档")
             writeStoredEntry("icons", rebuiltIcons)
         } finally {
             tempDir.deleteRecursively()

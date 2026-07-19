@@ -28,6 +28,7 @@ class ArchiveServiceTest {
         assertEquals("application/zip", ProjectImportPrimaryMimeType)
         assertTrue("application/zip" in ProjectImportMimeTypes)
         assertTrue("application/x-miui-theme" in ProjectImportMimeTypes)
+        assertTrue("application/vnd.android.package-archive" in ProjectImportMimeTypes)
         assertFalse("application/octet-stream" in ProjectImportMimeTypes)
         assertFalse("*/*" in ProjectImportMimeTypes)
     }

@@ -7,6 +7,7 @@ plugins {
 }
 
 import java.util.Properties
+import org.gradle.api.tasks.Exec
 
 val appGitCommitCount = providers.exec {
     workingDir(rootDir)
@@ -29,22 +30,26 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
-    val keystoreProperties = Properties().apply {
-        load(rootProject.file("keystore.properties").inputStream())
-    }
-
-    signingConfigs {
-        create("release") {
-            storeFile = rootProject.file("mykey.keystore")
-            storePassword = keystoreProperties["storePassword"] as String
-            keyAlias = keystoreProperties["keyAlias"] as String
-            keyPassword = keystoreProperties["keyPassword"] as String
+    val keystorePropertiesFile = rootProject.file("keystore.properties")
+    if (keystorePropertiesFile.exists()) {
+        val keystoreProperties = Properties().apply {
+            load(keystorePropertiesFile.inputStream())
+        }
+        signingConfigs {
+            create("release") {
+                storeFile = rootProject.file("mykey.keystore")
+                storePassword = keystoreProperties["storePassword"] as String
+                keyAlias = keystoreProperties["keyAlias"] as String
+                keyPassword = keystoreProperties["keyPassword"] as String
+            }
         }
     }
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("release")
+            if (keystorePropertiesFile.exists()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = true
             isShrinkResources = false
             proguardFiles(
@@ -75,6 +80,48 @@ android {
     lint {
         checkReleaseBuilds = false
     }
+
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
+
+    sourceSets {
+        getByName("main") {
+            jniLibs.srcDir("$projectDir/build/generated/aapt2-jni")
+        }
+    }
+}
+
+val bundleExportToolchain by tasks.registering(Exec::class) {
+    val script = rootProject.file("scripts/fetch_export_toolchain.sh")
+    commandLine("bash", script.absolutePath)
+    inputs.file(script)
+    outputs.dir(layout.projectDirectory.dir("src/main/assets/export_toolchain"))
+}
+
+val prepareAapt2JniLibs by tasks.registering {
+    dependsOn(bundleExportToolchain)
+    val assetDir = project.layout.projectDirectory.dir("src/main/assets/export_toolchain")
+    val generatedDir = project.layout.buildDirectory.dir("generated/aapt2-jni")
+    inputs.dir(assetDir)
+    outputs.dir(generatedDir)
+    doLast {
+        fun install(assetName: String, abiDir: String) {
+            val src = assetDir.file(assetName).asFile
+            check(src.isFile) { "缺少 aapt2 资源：$src" }
+            val dir = generatedDir.get().dir(abiDir).asFile
+            dir.mkdirs()
+            src.copyTo(dir.resolve("libiconeditor_aapt2.so"), overwrite = true)
+        }
+        install("aapt2-arm64", "arm64-v8a")
+        install("aapt2-x86_64", "x86_64")
+    }
+}
+
+tasks.named("preBuild") {
+    dependsOn(bundleExportToolchain, prepareAapt2JniLibs)
 }
 
 room {
@@ -99,7 +146,13 @@ dependencies {
     implementation(libs.miuix.blur)
     implementation(libs.miuix.navigation3.ui)
 
+    implementation(libs.androidx.camera.camera2)
+    implementation(libs.androidx.camera.lifecycle)
+    implementation(libs.androidx.camera.view)
+    implementation(libs.mlkit.barcode.scanning)
+
     debugImplementation(libs.compose.ui.tooling)
     ksp(libs.androidx.room.compiler)
     testImplementation(libs.junit)
+    implementation(libs.apksig)
 }
