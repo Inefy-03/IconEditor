@@ -21,7 +21,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -29,7 +28,6 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.BlendMode
@@ -38,22 +36,23 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import com.bocchi.iconeditor.R
-import com.bocchi.iconeditor.blend.ColorBlendToken
-import com.bocchi.iconeditor.effect.BgEffectBackground
-import com.bocchi.iconeditor.ui.theme.isIconEditorDark
-import kotlinx.coroutines.flow.onEach
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.bocchi.iconeditor.R
+import com.bocchi.iconeditor.blend.ColorBlendToken
+import com.bocchi.iconeditor.effect.BgEffectBackground
+import com.bocchi.iconeditor.ui.component.miuixBarBlur
+import com.bocchi.iconeditor.ui.component.rememberMiuixBlurBackdrop
+import com.bocchi.iconeditor.ui.theme.isIconEditorDark
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Icon
@@ -85,43 +84,60 @@ fun AboutPage(
 ) {
     val scrollBehavior = MiuixScrollBehavior()
     val lazyListState = rememberLazyListState()
+    val collapsedContentSpacingPx = with(LocalDensity.current) { 12.dp.roundToPx() }
     var logoHeightPx by remember { mutableIntStateOf(0) }
 
-    val scrollProgress by remember {
+    val scrollProgress by remember(collapsedContentSpacingPx) {
         derivedStateOf {
             if (logoHeightPx <= 0) {
                 0f
             } else {
                 val index = lazyListState.firstVisibleItemIndex
                 val offset = lazyListState.firstVisibleItemScrollOffset
-                if (index > 0) 1f else (offset.toFloat() / logoHeightPx).coerceIn(0f, 1f)
+                val collapseDistancePx = (logoHeightPx - collapsedContentSpacingPx).coerceAtLeast(1)
+                if (index > 0) 1f else (offset.toFloat() / collapseDistancePx).coerceIn(0f, 1f)
             }
         }
+    }
+    val barBackdrop = rememberMiuixBlurBackdrop(enableBlur = true)
+    val headerCollapsed = scrollProgress >= 0.999f
+    val barBlurActive = barBackdrop != null && headerCollapsed
+    val barColor = when {
+        barBlurActive -> Color.Transparent
+        headerCollapsed -> MiuixTheme.colorScheme.surface
+        else -> Color.Transparent
     }
 
     Scaffold(
         topBar = {
-            SmallTopAppBar(
-                title = stringResource(id = R.string.about_title),
-                scrollBehavior = scrollBehavior,
-                color = MiuixTheme.colorScheme.surface.copy(alpha = if (scrollProgress == 1f) 1f else 0f),
-                titleColor = MiuixTheme.colorScheme.onSurface.copy(alpha = scrollProgress),
-                defaultWindowInsetsPadding = false,
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(MiuixIcons.Back, contentDescription = stringResource(id = R.string.back))
+            Box(modifier = Modifier.miuixBarBlur(barBackdrop, enabled = barBlurActive)) {
+                SmallTopAppBar(
+                    title = stringResource(id = R.string.about_title),
+                    scrollBehavior = scrollBehavior,
+                    color = barColor,
+                    titleColor = MiuixTheme.colorScheme.onSurface.copy(alpha = scrollProgress),
+                    defaultWindowInsetsPadding = false,
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(MiuixIcons.Back, contentDescription = stringResource(id = R.string.back))
+                        }
                     }
-                }
-            )
+                )
+            }
         }
     ) { innerPadding ->
-        AboutContentBody(
-            padding = innerPadding,
-            lazyListState = lazyListState,
-            scrollProgress = scrollProgress,
-            scrollBehavior = scrollBehavior,
-            onLogoHeightChanged = { logoHeightPx = it }
-        )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .then(barBackdrop?.let { Modifier.layerBackdrop(it) } ?: Modifier),
+        ) {
+            AboutContentBody(
+                padding = innerPadding,
+                lazyListState = lazyListState,
+                scrollBehavior = scrollBehavior,
+                onLogoHeightChanged = { logoHeightPx = it }
+            )
+        }
     }
 }
 
@@ -129,7 +145,6 @@ fun AboutPage(
 private fun AboutContentBody(
     padding: PaddingValues,
     lazyListState: androidx.compose.foundation.lazy.LazyListState,
-    scrollProgress: Float,
     scrollBehavior: ScrollBehavior,
     onLogoHeightChanged: (Int) -> Unit
 ) {
@@ -171,44 +186,88 @@ private fun AboutContentBody(
         }
     }
 
-    // Animation states
+    // Header layout and deterministic scroll-driven animation
     var logoHeightDp by remember { mutableStateOf(300.dp) }
-    var logoAreaY by remember { mutableFloatStateOf(0f) }
-    var iconY by remember { mutableFloatStateOf(0f) }
-    var projectNameY by remember { mutableFloatStateOf(0f) }
-    var versionCodeY by remember { mutableFloatStateOf(0f) }
+    var listViewportHeightPx by remember { mutableIntStateOf(0) }
+    var actionCardHeightPx by remember { mutableIntStateOf(0) }
+    var logoAreaBottomPx by remember(listViewportHeightPx) { mutableFloatStateOf(0f) }
+    var iconBottomPx by remember(listViewportHeightPx) { mutableFloatStateOf(0f) }
+    var projectNameBottomPx by remember(listViewportHeightPx) { mutableFloatStateOf(0f) }
+    var versionCodeBottomPx by remember(listViewportHeightPx) { mutableFloatStateOf(0f) }
 
-    var iconProgress by remember { mutableFloatStateOf(0f) }
-    var projectNameProgress by remember { mutableFloatStateOf(0f) }
-    var versionCodeProgress by remember { mutableFloatStateOf(0f) }
-    var initialLogoAreaY by remember { mutableFloatStateOf(0f) }
-
-    LaunchedEffect(lazyListState) {
-        snapshotFlow { lazyListState.firstVisibleItemScrollOffset }
-            .onEach { offset ->
-                if (lazyListState.firstVisibleItemIndex > 0) {
-                    if (iconProgress != 1f) iconProgress = 1f
-                    if (projectNameProgress != 1f) projectNameProgress = 1f
-                    if (versionCodeProgress != 1f) versionCodeProgress = 1f
-                    return@onEach
-                }
-
-                if (initialLogoAreaY == 0f && logoAreaY > 0f) initialLogoAreaY = logoAreaY
-                val refLogoAreaY = if (initialLogoAreaY > 0f) initialLogoAreaY else logoAreaY
-
-                val stage1TotalLength = refLogoAreaY - versionCodeY
-                val stage2TotalLength = versionCodeY - projectNameY
-                val stage3TotalLength = projectNameY - iconY
-
-                val versionCodeDelay = stage1TotalLength * 0.5f
-                versionCodeProgress = ((offset.toFloat() - versionCodeDelay) / (stage1TotalLength - versionCodeDelay).coerceAtLeast(1f))
-                    .coerceIn(0f, 1f)
-                projectNameProgress = ((offset.toFloat() - stage1TotalLength) / stage2TotalLength.coerceAtLeast(1f))
-                    .coerceIn(0f, 1f)
-                iconProgress = ((offset.toFloat() - stage1TotalLength - stage2TotalLength) / stage3TotalLength.coerceAtLeast(1f))
-                    .coerceIn(0f, 1f)
-            }
-            .collect {}
+    val headerPositionsReady = logoAreaBottomPx > 0f &&
+        iconBottomPx > 0f &&
+        projectNameBottomPx > iconBottomPx &&
+        versionCodeBottomPx > projectNameBottomPx
+    val versionCodeFadeEnd = if (headerPositionsReady) {
+        (logoAreaBottomPx - versionCodeBottomPx).coerceAtLeast(1f)
+    } else {
+        1f
+    }
+    val projectNameFadeEnd = versionCodeFadeEnd + if (headerPositionsReady) {
+        (versionCodeBottomPx - projectNameBottomPx).coerceAtLeast(1f)
+    } else {
+        1f
+    }
+    val iconFadeEnd = projectNameFadeEnd + if (headerPositionsReady) {
+        (projectNameBottomPx - iconBottomPx).coerceAtLeast(1f)
+    } else {
+        1f
+    }
+    val fadeLeadDistancePx = with(density) { 12.dp.toPx() }
+    val versionCodeFadeStart = (versionCodeFadeEnd * 0.5f - fadeLeadDistancePx).coerceAtLeast(0f)
+    val versionCodeFadeFinish = (versionCodeFadeEnd - fadeLeadDistancePx)
+        .coerceAtLeast(versionCodeFadeStart + 1f)
+    val projectNameFadeStart = versionCodeFadeFinish
+    val projectNameFadeFinish = (projectNameFadeEnd - fadeLeadDistancePx)
+        .coerceAtLeast(projectNameFadeStart + 1f)
+    val iconFadeStart = projectNameFadeFinish
+    val iconFadeFinish = (iconFadeEnd - fadeLeadDistancePx)
+        .coerceAtLeast(iconFadeStart + 1f)
+    val topBarBottomPx = with(density) { padding.calculateTopPadding().toPx() }
+    val backgroundFadeFinish = (logoAreaBottomPx - topBarBottomPx - fadeLeadDistancePx)
+        .coerceAtLeast(versionCodeFadeStart + 1f)
+    val elementScrollOffsetPx = if (lazyListState.firstVisibleItemIndex > 0) {
+        iconFadeFinish
+    } else {
+        lazyListState.firstVisibleItemScrollOffset.toFloat()
+    }
+    val backgroundScrollOffsetPx = if (lazyListState.firstVisibleItemIndex > 0) {
+        backgroundFadeFinish
+    } else {
+        lazyListState.firstVisibleItemScrollOffset.toFloat()
+    }
+    val versionCodeProgress = if (headerPositionsReady) {
+        collapseProgress(elementScrollOffsetPx, start = versionCodeFadeStart, end = versionCodeFadeFinish)
+    } else {
+        0f
+    }
+    val projectNameProgress = if (headerPositionsReady) {
+        collapseProgress(elementScrollOffsetPx, start = projectNameFadeStart, end = projectNameFadeFinish)
+    } else {
+        0f
+    }
+    val iconProgress = if (headerPositionsReady) {
+        collapseProgress(elementScrollOffsetPx, start = iconFadeStart, end = iconFadeFinish)
+    } else {
+        0f
+    }
+    val backgroundProgress = if (headerPositionsReady) {
+        collapseProgress(
+            backgroundScrollOffsetPx,
+            start = versionCodeFadeStart,
+            end = backgroundFadeFinish,
+        )
+    } else {
+        0f
+    }
+    val scrollRunway = with(density) {
+        val availableHeight = listViewportHeightPx.toDp() -
+            padding.calculateTopPadding() -
+            padding.calculateBottomPadding() -
+            actionCardHeightPx.toDp() -
+            12.dp
+        availableHeight.coerceAtLeast(0.dp)
     }
 
     val displayCutoutInsets = WindowInsets.displayCutout.asPaddingValues()
@@ -218,7 +277,7 @@ private fun AboutContentBody(
         start = horizontalSafeInsets.calculateStartPadding(layoutDirection) + displayCutoutInsets.calculateStartPadding(layoutDirection),
         top = padding.calculateTopPadding(),
         end = horizontalSafeInsets.calculateEndPadding(layoutDirection) + displayCutoutInsets.calculateEndPadding(layoutDirection),
-        bottom = padding.calculateBottomPadding()
+        bottom = padding.calculateBottomPadding() + scrollRunway
     )
 
     val logoPadding = PaddingValues(
@@ -247,15 +306,16 @@ private fun AboutContentBody(
                 modifier = Modifier
                     .requiredSize(112.dp)
                     .graphicsLayer {
-                        alpha = 1 - iconProgress
-                        scaleX = 1 - (iconProgress * 0.05f)
-                        scaleY = 1 - (iconProgress * 0.05f)
+                        alpha = 1f - iconProgress
+                        scaleX = 1f - (iconProgress * 0.18f)
+                        scaleY = 1f - (iconProgress * 0.18f)
                     }
                     .onGloballyPositioned { coordinates ->
-                        if (iconY == 0f) {
-                            val y = coordinates.positionInWindow().y
-                            val size = coordinates.size
-                            iconY = y + size.height
+                        if (
+                            lazyListState.firstVisibleItemIndex == 0 &&
+                            lazyListState.firstVisibleItemScrollOffset == 0
+                        ) {
+                            iconBottomPx = coordinates.positionInRoot().y + coordinates.size.height
                         }
                     },
             ) {
@@ -279,17 +339,18 @@ private fun AboutContentBody(
             Text(
                 modifier = Modifier
                     .padding(top = 12.dp, bottom = 5.dp)
-                    .onGloballyPositioned { coordinates ->
-                        if (projectNameY == 0f) {
-                            val y = coordinates.positionInWindow().y
-                            val size = coordinates.size
-                            projectNameY = y + size.height
-                        }
-                    }
                     .graphicsLayer {
-                        alpha = 1 - projectNameProgress
-                        scaleX = 1 - (projectNameProgress * 0.05f)
-                        scaleY = 1 - (projectNameProgress * 0.05f)
+                        alpha = 1f - projectNameProgress
+                        scaleX = 1f - (projectNameProgress * 0.14f)
+                        scaleY = 1f - (projectNameProgress * 0.14f)
+                    }
+                    .onGloballyPositioned { coordinates ->
+                        if (
+                            lazyListState.firstVisibleItemIndex == 0 &&
+                            lazyListState.firstVisibleItemScrollOffset == 0
+                        ) {
+                            projectNameBottomPx = coordinates.positionInRoot().y + coordinates.size.height
+                        }
                     }
                     .textureBlur(
                         backdrop = backdrop,
@@ -309,15 +370,16 @@ private fun AboutContentBody(
                 modifier = Modifier
                     .fillMaxWidth()
                     .graphicsLayer {
-                        alpha = 1 - versionCodeProgress
-                        scaleX = 1 - (versionCodeProgress * 0.05f)
-                        scaleY = 1 - (versionCodeProgress * 0.05f)
+                        alpha = 1f - versionCodeProgress
+                        scaleX = 1f - (versionCodeProgress * 0.1f)
+                        scaleY = 1f - (versionCodeProgress * 0.1f)
                     }
                     .onGloballyPositioned { coordinates ->
-                        if (versionCodeY == 0f) {
-                            val y = coordinates.positionInWindow().y
-                            val size = coordinates.size
-                            versionCodeY = y + size.height
+                        if (
+                            lazyListState.firstVisibleItemIndex == 0 &&
+                            lazyListState.firstVisibleItemScrollOffset == 0
+                        ) {
+                            versionCodeBottomPx = coordinates.positionInRoot().y + coordinates.size.height
                         }
                     },
                 horizontalAlignment = Alignment.CenterHorizontally
@@ -340,6 +402,7 @@ private fun AboutContentBody(
             state = lazyListState,
             modifier = Modifier
                 .fillMaxSize()
+                .onSizeChanged { size -> listViewportHeightPx = size.height }
                 .scrollEndHaptic()
                 .overScrollVertical()
                 .nestedScroll(scrollBehavior.nestedScrollConnection),
@@ -357,9 +420,12 @@ private fun AboutContentBody(
                         )
                         .onSizeChanged { size -> onLogoHeightChanged(size.height) }
                         .onGloballyPositioned { coordinates ->
-                            val y = coordinates.positionInWindow().y
-                            val size = coordinates.size
-                            logoAreaY = y + size.height
+                            if (
+                                lazyListState.firstVisibleItemIndex == 0 &&
+                                lazyListState.firstVisibleItemScrollOffset == 0
+                            ) {
+                                logoAreaBottomPx = coordinates.positionInRoot().y + coordinates.size.height
+                            }
                         }
                 )
             }
@@ -367,6 +433,7 @@ private fun AboutContentBody(
             item {
                 Card(
                     modifier = Modifier
+                        .onSizeChanged { size -> actionCardHeightPx = size.height }
                         .padding(horizontal = 12.dp)
                         .padding(bottom = 12.dp)
                         .textureBlur(
@@ -404,8 +471,17 @@ private fun AboutContentBody(
         modifier = Modifier.fillMaxSize(),
         bgModifier = Modifier.layerBackdrop(backdrop),
         effectBackground = effectBackground,
-        alpha = { 1f - scrollProgress },
+        alpha = { 1f - backgroundProgress },
         isOs3Effect = isOs3Effect,
         content = { bodyContent() }
     )
+}
+
+private fun collapseProgress(
+    value: Float,
+    start: Float,
+    end: Float,
+): Float {
+    val linearProgress = ((value - start) / (end - start)).coerceIn(0f, 1f)
+    return linearProgress * linearProgress * (3f - 2f * linearProgress)
 }
