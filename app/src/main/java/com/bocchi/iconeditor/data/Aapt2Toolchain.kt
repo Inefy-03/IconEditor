@@ -5,13 +5,14 @@ import android.os.Build
 import android.system.Os
 import java.io.File
 import java.util.zip.GZIPInputStream
+import java.util.zip.ZipFile
 
 /**
  * 解析设备端 aapt2 与 android.jar。
  *
- * aapt2 是静态链接的 ELF（ET_EXEC），打包为 jniLibs 后解压到 nativeLibraryDir。
- * 该目录可读可执行、不可写，允许直接 exec（Android 10+ 禁止从 files/cache 执行）。
- * 不能交给 linker64（静态二进制没有 .dynamic）。
+ * aapt2 is a 16 KB-aligned PIE packaged as a JNI library and extracted to
+ * nativeLibraryDir. That directory is readable and executable, so the app can
+ * launch it directly without copying an executable into files/cache.
  */
 class Aapt2Toolchain(private val context: Context) {
     data class Resolved(
@@ -70,7 +71,8 @@ class Aapt2Toolchain(private val context: Context) {
 
     private fun ensureAndroidJar(dataDir: File): File {
         val target = File(dataDir, "android-35.jar")
-        if (target.isFile && target.length() > 0L) return target
+        if (isCompactFrameworkJar(target)) return target
+        target.delete()
         val assetCandidates = listOf(
             "export_toolchain/android-35.jar",
             "export_toolchain/android-35.jar.gz",
@@ -87,13 +89,30 @@ class Aapt2Toolchain(private val context: Context) {
                         target.outputStream().use { output -> input.copyTo(output) }
                     }
                 }
-                if (target.isFile && target.length() > 0L) return target
+                if (isCompactFrameworkJar(target)) return target
+                target.delete()
+                lastError = IllegalStateException("Invalid compact framework resource jar: $assetPath")
             } catch (error: Exception) {
+                target.delete()
                 lastError = error
             }
         }
         throw lastError ?: IllegalStateException("无法加载 export_toolchain/android-35.jar")
     }
+
+    private fun isCompactFrameworkJar(file: File): Boolean = runCatching {
+        if (!file.isFile || file.length() <= 0L) return@runCatching false
+        ZipFile(file).use { zip ->
+            val names = buildSet {
+                val entries = zip.entries()
+                while (entries.hasMoreElements()) {
+                    val entry = entries.nextElement()
+                    if (!entry.isDirectory) add(entry.name)
+                }
+            }
+            names == CompactFrameworkEntries
+        }
+    }.getOrDefault(false)
 
     private fun verifyAapt2Runnable(resolved: Resolved) {
         val process = ProcessBuilder(resolved.command(listOf("version")))
@@ -107,6 +126,8 @@ class Aapt2Toolchain(private val context: Context) {
     }
 
     companion object {
+        private val CompactFrameworkEntries = setOf("AndroidManifest.xml", "resources.arsc")
+
         private val preferredBuildToolsVersions = listOf(
             "34.0.0",
             "35.0.0",

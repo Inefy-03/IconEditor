@@ -1,5 +1,8 @@
 package com.bocchi.iconeditor
 
+import com.android.apksig.ApkSigner
+import com.android.apksig.ApkVerifier
+import com.android.apksig.KeyConfig
 import com.bocchi.iconeditor.data.Aapt2IconPackCompiler
 import com.bocchi.iconeditor.data.Aapt2Toolchain
 import com.bocchi.iconeditor.data.IconMappingBridge
@@ -11,14 +14,28 @@ import org.junit.Test
 import java.awt.image.BufferedImage
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.security.KeyStore
+import java.security.PrivateKey
+import java.security.cert.X509Certificate
 import javax.imageio.ImageIO
 
 class Aapt2IconPackCompilerTest {
     @Test
-    fun buildUnsignedApkWithAapt2() {
-        val toolchain = Aapt2Toolchain.resolveHostToolchain()
-        assumeTrue("需要本机 ANDROID_HOME aapt2", toolchain != null)
-        val resolved = requireNotNull(toolchain)
+    fun buildAndSignApkWithEmbeddedApksig() {
+        val hostToolchain = Aapt2Toolchain.resolveHostToolchain()
+        assumeTrue("需要本机 ANDROID_HOME aapt2", hostToolchain != null)
+        val workingDir = File(checkNotNull(System.getProperty("user.dir")))
+        val moduleDir = if (File(workingDir, "src/main").isDirectory) {
+            workingDir
+        } else {
+            File(workingDir, "app")
+        }
+        val packagedFramework = File(
+            moduleDir,
+            "src/main/assets/export_toolchain/android-35.jar",
+        )
+        assertTrue("Missing packaged framework resource jar", packagedFramework.isFile)
+        val resolved = requireNotNull(hostToolchain).copy(androidJar = packagedFramework)
 
         val workDir = java.nio.file.Files.createTempDirectory("iconeditor-aapt2").toFile()
         val unsigned = File(workDir, "unsigned.apk")
@@ -58,34 +75,59 @@ class Aapt2IconPackCompilerTest {
         assertTrue(unsigned.isFile)
         assertTrue(unsigned.length() > 0L)
 
-        val projectRoot = File(checkNotNull(System.getProperty("user.dir")))
-        val ks = File(projectRoot, "app/src/main/assets/archive_templates/apk/export_keystore.jks")
-        val signer = File(resolved.aapt2.parentFile, "apksigner")
-        if (signer.isFile && ks.isFile) {
-            val sign = ProcessBuilder(
-                signer.absolutePath,
-                "sign",
-                "--ks", ks.absolutePath,
-                "--ks-pass", "pass:iconeditor",
-                "--key-pass", "pass:iconeditor",
-                "--ks-key-alias", "iconeditor_export",
-                "--out", signed.absolutePath,
-                unsigned.absolutePath,
-            ).redirectErrorStream(true).start()
-            val signOutput = sign.inputStream.bufferedReader().readText()
-            assertTrue("apksigner failed: $signOutput", sign.waitFor() == 0)
-
-            val badging = ProcessBuilder(resolved.aapt2.absolutePath, "dump", "badging", signed.absolutePath)
-                .redirectErrorStream(true).start()
-            val badgingOutput = badging.inputStream.bufferedReader().readText()
-            assertTrue("badging failed: $badgingOutput", badging.waitFor() == 0)
-            assertTrue(badgingOutput.contains("package: name='com.example.iconpack'"))
-            assertTrue(badgingOutput.contains("versionCode='1'"))
-            assertTrue(
-                badgingOutput.contains("hasCode='false'") ||
-                    badgingOutput.contains("hasCode: 'false'"),
-            )
+        val ks = File(moduleDir, "src/main/assets/archive_templates/apk/export_keystore.jks")
+        assertTrue("Missing packaged export keystore", ks.isFile)
+        val password = "iconeditor".toCharArray()
+        val keystore = KeyStore.getInstance("PKCS12").apply {
+            ks.inputStream().use { load(it, password) }
         }
+        val alias = "iconeditor_export"
+        val privateKey = keystore.getKey(alias, password) as PrivateKey
+        val certificate = keystore.getCertificate(alias) as X509Certificate
+        ApkSigner.Builder(
+            listOf(
+                ApkSigner.SignerConfig.Builder(
+                    alias,
+                    KeyConfig.Jca(privateKey),
+                    listOf(certificate),
+                ).build(),
+            ),
+        )
+            .setInputApk(unsigned)
+            .setOutputApk(signed)
+            .setMinSdkVersion(21)
+            .setV1SigningEnabled(true)
+            .setV2SigningEnabled(true)
+            .setV3SigningEnabled(true)
+            .build()
+            .sign()
+        assertTrue("Embedded apksig did not produce a signed APK", signed.isFile && signed.length() > 0L)
+        val verification = ApkVerifier.Builder(signed)
+            .setMinCheckedPlatformVersion(21)
+            .build()
+            .verify()
+        assertTrue("Embedded apksig verification failed: ${verification.errors}", verification.isVerified)
+        assertTrue("Missing v1 signature", verification.isVerifiedUsingV1Scheme)
+        assertTrue("Missing v2 signature", verification.isVerifiedUsingV2Scheme)
+
+        val badging = ProcessBuilder(resolved.aapt2.absolutePath, "dump", "badging", signed.absolutePath)
+            .redirectErrorStream(true).start()
+        val badgingOutput = badging.inputStream.bufferedReader().readText()
+        assertTrue("badging failed: $badgingOutput", badging.waitFor() == 0)
+        assertTrue(badgingOutput.contains("package: name='com.example.iconpack'"))
+        assertTrue(badgingOutput.contains("versionCode='1'"))
+
+        val manifest = ProcessBuilder(
+            resolved.aapt2.absolutePath,
+            "dump",
+            "xmltree",
+            signed.absolutePath,
+            "--file",
+            "AndroidManifest.xml",
+        ).redirectErrorStream(true).start()
+        val manifestOutput = manifest.inputStream.bufferedReader().readText()
+        assertTrue("manifest dump failed: $manifestOutput", manifest.waitFor() == 0)
+        assertTrue(manifestOutput.contains("hasCode") && manifestOutput.contains("=false"))
 
         val resources = ProcessBuilder(resolved.aapt2.absolutePath, "dump", "resources", unsigned.absolutePath)
             .redirectErrorStream(true)

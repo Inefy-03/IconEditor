@@ -1,10 +1,12 @@
 package com.bocchi.iconeditor.ui
 
 import android.Manifest
+import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.util.Size
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -19,10 +21,10 @@ import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -38,6 +40,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.bocchi.iconeditor.R
 import com.bocchi.iconeditor.data.sync.ProjectSyncConnectionParser
+import com.google.mlkit.vision.barcode.BarcodeScanner
 import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
@@ -47,10 +50,15 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.ColorSchemeMode
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.ThemeController
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 class SyncQrScanActivity : ComponentActivity() {
+    private var cameraProvider: ProcessCameraProvider? = null
+    private var barcodeScanner: BarcodeScanner? = null
+    private var analysisExecutor: ExecutorService? = null
+
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
@@ -73,10 +81,27 @@ class SyncQrScanActivity : ComponentActivity() {
     }
 
     private fun showScanner() {
+        if (barcodeScanner != null) return
+        val scanner = runCatching {
+            val options = BarcodeScannerOptions.Builder()
+                .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
+                .build()
+            BarcodeScanning.getClient(options)
+        }.getOrElse {
+            showScannerUnavailable()
+            return
+        }
+        val executor = Executors.newSingleThreadExecutor()
+        barcodeScanner = scanner
+        analysisExecutor = executor
         setContent {
             val controller = remember { ThemeController(colorSchemeMode = ColorSchemeMode.System) }
             MiuixTheme(controller = controller) {
                 QrScannerScreen(
+                    scanner = scanner,
+                    analysisExecutor = executor,
+                    onCameraProvider = { cameraProvider = it },
+                    onScannerInitializationError = ::showScannerUnavailable,
                     onCancel = {
                         setResult(RESULT_CANCELED)
                         finish()
@@ -95,6 +120,23 @@ class SyncQrScanActivity : ComponentActivity() {
         }
     }
 
+    private fun showScannerUnavailable() {
+        if (isFinishing || isDestroyed) return
+        Toast.makeText(this, R.string.sync_scan_unavailable, Toast.LENGTH_SHORT).show()
+        setResult(RESULT_CANCELED)
+        finish()
+    }
+
+    override fun onDestroy() {
+        runCatching { cameraProvider?.unbindAll() }
+        runCatching { barcodeScanner?.close() }
+        analysisExecutor?.shutdownNow()
+        cameraProvider = null
+        barcodeScanner = null
+        analysisExecutor = null
+        super.onDestroy()
+    }
+
     companion object {
         const val EXTRA_RAW_VALUE = "raw_value"
     }
@@ -102,13 +144,17 @@ class SyncQrScanActivity : ComponentActivity() {
 
 @Composable
 private fun QrScannerScreen(
+    scanner: BarcodeScanner,
+    analysisExecutor: ExecutorService,
+    onCameraProvider: (ProcessCameraProvider) -> Unit,
+    onScannerInitializationError: () -> Unit,
     onCancel: () -> Unit,
     onRawValue: (String) -> Boolean,
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val handled = remember { AtomicBoolean(false) }
-    var hint by remember { mutableStateOf(context.getString(R.string.sync_scan_hint)) }
+    var hint by remember { mutableStateOf(context.getString(R.string.sync_scan_camera_hint)) }
 
     Box(
         modifier = Modifier
@@ -118,60 +164,80 @@ private fun QrScannerScreen(
         AndroidView(
             factory = { ctx ->
                 PreviewView(ctx).also { previewView ->
-                    val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
+                    val cameraProviderFuture = runCatching {
+                        ProcessCameraProvider.getInstance(ctx)
+                    }.getOrElse {
+                        previewView.post(onScannerInitializationError)
+                        return@also
+                    }
                     cameraProviderFuture.addListener(
                         {
-                            val cameraProvider = cameraProviderFuture.get()
-                            val preview = Preview.Builder().build().also {
-                                it.surfaceProvider = previewView.surfaceProvider
-                            }
-                            val analysis = ImageAnalysis.Builder()
-                                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                                .setResolutionSelector(
-                                    ResolutionSelector.Builder()
-                                        .setResolutionStrategy(
-                                            ResolutionStrategy(
-                                                Size(1280, 720),
-                                                ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER,
-                                            ),
+                            runCatching {
+                                val cameraProvider = cameraProviderFuture.get()
+                                val preview = Preview.Builder().build().also {
+                                    it.surfaceProvider = previewView.surfaceProvider
+                                }
+                                val analysis = ImageAnalysis.Builder()
+                                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                                    .setResolutionSelector(
+                                        ResolutionSelector.Builder()
+                                            .setResolutionStrategy(
+                                                ResolutionStrategy(
+                                                    Size(1280, 720),
+                                                    ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER,
+                                                ),
+                                            )
+                                            .build(),
+                                    )
+                                    .build()
+                                analysis.setAnalyzer(analysisExecutor) { imageProxy ->
+                                    if (handled.get()) {
+                                        imageProxy.close()
+                                        return@setAnalyzer
+                                    }
+                                    val mediaImage = imageProxy.image
+                                    if (mediaImage == null) {
+                                        imageProxy.close()
+                                        return@setAnalyzer
+                                    }
+                                    val task = runCatching {
+                                        val image = InputImage.fromMediaImage(
+                                            mediaImage,
+                                            imageProxy.imageInfo.rotationDegrees,
                                         )
-                                        .build(),
-                                )
-                                .build()
-                            val options = BarcodeScannerOptions.Builder()
-                                .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
-                                .build()
-                            val scanner = BarcodeScanning.getClient(options)
-                            val executor = Executors.newSingleThreadExecutor()
-                            analysis.setAnalyzer(executor) { imageProxy ->
-                                if (handled.get()) {
-                                    imageProxy.close()
-                                    return@setAnalyzer
-                                }
-                                val mediaImage = imageProxy.image
-                                if (mediaImage == null) {
-                                    imageProxy.close()
-                                    return@setAnalyzer
-                                }
-                                val image = InputImage.fromMediaImage(
-                                    mediaImage,
-                                    imageProxy.imageInfo.rotationDegrees,
-                                )
-                                scanner.process(image)
-                                    .addOnSuccessListener { barcodes ->
-                                        val raw = barcodes.firstOrNull()?.rawValue?.trim().orEmpty()
-                                        if (raw.isEmpty()) return@addOnSuccessListener
-                                        if (!handled.compareAndSet(false, true)) return@addOnSuccessListener
+                                        scanner.process(image)
+                                    }.getOrElse {
+                                        imageProxy.close()
                                         previewView.post {
-                                            if (!onRawValue(raw)) {
-                                                handled.set(false)
-                                                hint = context.getString(R.string.sync_scan_invalid)
+                                            hint = context.getString(R.string.sync_scan_unavailable)
+                                        }
+                                        return@setAnalyzer
+                                    }
+                                    val handleBarcodes: (List<Barcode>) -> Unit = { barcodes ->
+                                        val raw = barcodes.firstOrNull()?.rawValue?.trim().orEmpty()
+                                        if (raw.isNotEmpty() && handled.compareAndSet(false, true)) {
+                                            previewView.post {
+                                                if (!onRawValue(raw)) {
+                                                    handled.set(false)
+                                                    hint = context.getString(R.string.sync_scan_invalid)
+                                                }
                                             }
                                         }
                                     }
-                                    .addOnCompleteListener { imageProxy.close() }
-                            }
-                            runCatching {
+                                    val handleFailure = {
+                                        previewView.post {
+                                            hint = context.getString(R.string.sync_scan_unavailable)
+                                        }
+                                    }
+                                    if (context is Activity) {
+                                        task.addOnSuccessListener(context) { barcodes -> handleBarcodes(barcodes) }
+                                        task.addOnFailureListener(context) { handleFailure() }
+                                    } else {
+                                        task.addOnSuccessListener { barcodes -> handleBarcodes(barcodes) }
+                                        task.addOnFailureListener { handleFailure() }
+                                    }
+                                    task.addOnCompleteListener { imageProxy.close() }
+                                }
                                 cameraProvider.unbindAll()
                                 cameraProvider.bindToLifecycle(
                                     lifecycleOwner,
@@ -179,6 +245,9 @@ private fun QrScannerScreen(
                                     preview,
                                     analysis,
                                 )
+                                onCameraProvider(cameraProvider)
+                            }.onFailure {
+                                previewView.post(onScannerInitializationError)
                             }
                         },
                         ContextCompat.getMainExecutor(ctx),
@@ -200,13 +269,10 @@ private fun QrScannerScreen(
             onClick = onCancel,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = 48.dp),
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp, vertical = 48.dp),
         ) {
             Text(stringResource(R.string.action_cancel))
         }
-    }
-
-    DisposableEffect(Unit) {
-        onDispose { }
     }
 }

@@ -2,6 +2,7 @@ package com.bocchi.iconeditor.data
 
 import android.content.Context
 import com.android.apksig.ApkSigner
+import com.android.apksig.KeyConfig
 import com.bocchi.iconeditor.model.ApkInfo
 import com.bocchi.iconeditor.model.ExportPhase
 import com.bocchi.iconeditor.model.IconAsset
@@ -94,7 +95,7 @@ class ApkIconPackExporter(private val context: Context) {
                 listOf(
                     ApkSigner.SignerConfig.Builder(
                         KEY_ALIAS,
-                        privateKey,
+                        KeyConfig.Jca(privateKey),
                         listOf(certificate),
                     ).build(),
                 ),
