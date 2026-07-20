@@ -45,6 +45,7 @@ import com.bocchi.iconeditor.model.IconPreferences
 import com.bocchi.iconeditor.model.InfoTab
 import com.bocchi.iconeditor.model.ProjectSortField
 import com.bocchi.iconeditor.model.SortField
+import com.bocchi.iconeditor.model.SpecialAssetsTab
 import com.bocchi.iconeditor.model.ThemeMode
 import androidx.navigation3.runtime.NavKey
 import kotlinx.serialization.Serializable
@@ -77,6 +78,7 @@ import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import top.yukonga.miuix.kmp.blur.textureBlur
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Back
+import top.yukonga.miuix.kmp.icon.extended.Filter
 import top.yukonga.miuix.kmp.icon.extended.Folder
 import top.yukonga.miuix.kmp.icon.extended.More
 import top.yukonga.miuix.kmp.icon.extended.Settings
@@ -94,6 +96,7 @@ enum class Screen : NavKey {
     Settings,
     Info,
     Icons,
+    SpecialAssets,
     ThemeSettings,
     About,
     ProjectSync,
@@ -146,6 +149,8 @@ fun RootPagerContent(
     HorizontalPager(
         state = pagerState,
         overscrollEffect = null,
+        verticalAlignment = Alignment.Top,
+        beyondViewportPageCount = 1,
         modifier = Modifier
             .fillMaxSize()
             .overScrollHorizontal()
@@ -203,16 +208,20 @@ fun AppTopBar(
     onProjectSortField: (ProjectSortField) -> Unit = {},
     infoTab: InfoTab = InfoTab.Mtz,
     onInfoTab: (InfoTab) -> Unit = {},
+    specialAssetsTab: SpecialAssetsTab = SpecialAssetsTab.Masks,
+    onSpecialAssetsTab: (SpecialAssetsTab) -> Unit = {},
     onImportIcons: () -> Unit = {},
     onAddIcon: () -> Unit = {},
 ) {
     var showIconSortMenu by remember { mutableStateOf(false) }
+    var showIconFilterMenu by remember { mutableStateOf(false) }
     var showIconOptionsMenu by remember { mutableStateOf(false) }
     val title = when (screen) {
         Screen.Projects -> stringResource(R.string.screen_projects)
         Screen.Settings -> stringResource(R.string.screen_settings)
         Screen.Info -> stringResource(R.string.screen_info_edit)
         Screen.Icons -> stringResource(R.string.screen_icon_edit)
+        Screen.SpecialAssets -> stringResource(R.string.screen_special_assets)
         Screen.ThemeSettings -> stringResource(R.string.screen_theme_settings)
         Screen.About -> stringResource(R.string.about_title)
         Screen.ProjectSync -> stringResource(R.string.screen_project_sync)
@@ -267,6 +276,27 @@ fun AppTopBar(
                     }
                     Box {
                         IconButton(
+                            onClick = { showIconFilterMenu = true },
+                            holdDownState = showIconFilterMenu,
+                        ) {
+                            Icon(MiuixIcons.Filter, contentDescription = stringResource(R.string.action_filter))
+                        }
+                        OverlayListPopup(
+                            show = showIconFilterMenu,
+                            popupPositionProvider = ListPopupDefaults.dropdownPositionProvider(verticalMargin = 0.dp),
+                            alignment = PopupPositionProvider.Align.End,
+                            enableWindowDim = true,
+                            onDismissRequest = { showIconFilterMenu = false },
+                        ) {
+                            IconFilterMenu(
+                                preferences = iconPreferences,
+                                onPreferences = onIconPreferences,
+                                onDismiss = { showIconFilterMenu = false },
+                            )
+                        }
+                    }
+                    Box {
+                        IconButton(
                             onClick = { showIconOptionsMenu = true },
                             holdDownState = showIconOptionsMenu,
                         ) {
@@ -298,76 +328,10 @@ fun AppTopBar(
                                     isSelected = false,
                                     index = 1,
                                     isFirst = false,
-                                    isLast = false,
+                                    isLast = true,
                                     onSelectedIndexChange = {
                                         showIconOptionsMenu = false
                                         onImportIcons()
-                                    },
-                                )
-                                PopupGroupDivider()
-                                DropdownImpl(
-                                    item = DropdownItem(text = stringResource(R.string.show_local_apps)),
-                                    optionSize = IconOptionsMenuCount,
-                                    isSelected = iconPreferences.showLocalApps,
-                                    index = 2,
-                                    isFirst = false,
-                                    isLast = false,
-                                    onSelectedIndexChange = {
-                                        onIconPreferences(
-                                            iconPreferences.copy(
-                                                showLocalApps = !iconPreferences.showLocalApps,
-                                            ),
-                                        )
-                                        showIconOptionsMenu = false
-                                    },
-                                )
-                                DropdownImpl(
-                                    item = DropdownItem(text = stringResource(R.string.show_system_apps)),
-                                    optionSize = IconOptionsMenuCount,
-                                    isSelected = iconPreferences.showSystemApps,
-                                    index = 3,
-                                    isFirst = false,
-                                    isLast = false,
-                                    onSelectedIndexChange = {
-                                        onIconPreferences(
-                                            iconPreferences.copy(showSystemApps = !iconPreferences.showSystemApps),
-                                        )
-                                        showIconOptionsMenu = false
-                                    },
-                                )
-                                PopupGroupDivider()
-                                DropdownImpl(
-                                    item = DropdownItem(text = stringResource(R.string.only_show_multiple_styles)),
-                                    optionSize = IconOptionsMenuCount,
-                                    isSelected = iconPreferences.onlyShowMultipleStyles,
-                                    index = 4,
-                                    isFirst = false,
-                                    isLast = false,
-                                    onSelectedIndexChange = {
-                                        onIconPreferences(
-                                            iconPreferences.copy(
-                                                onlyShowMultipleStyles = !iconPreferences.onlyShowMultipleStyles,
-                                                onlyShowUnadaptedIcons = false,
-                                            ),
-                                        )
-                                        showIconOptionsMenu = false
-                                    },
-                                )
-                                DropdownImpl(
-                                    item = DropdownItem(text = stringResource(R.string.only_show_unadapted_icons)),
-                                    optionSize = IconOptionsMenuCount,
-                                    isSelected = iconPreferences.onlyShowUnadaptedIcons,
-                                    index = 5,
-                                    isFirst = false,
-                                    isLast = true,
-                                    onSelectedIndexChange = {
-                                        onIconPreferences(
-                                            iconPreferences.copy(
-                                                onlyShowUnadaptedIcons = !iconPreferences.onlyShowUnadaptedIcons,
-                                                onlyShowMultipleStyles = false,
-                                            ),
-                                        )
-                                        showIconOptionsMenu = false
                                     },
                                 )
                             }
@@ -387,9 +351,31 @@ fun AppTopBar(
                     selectedTab = infoTab,
                     onSelectedTab = onInfoTab,
                 )
+                Screen.SpecialAssets -> SpecialAssetsTabRow(
+                    selectedTab = specialAssetsTab,
+                    onSelectedTab = onSpecialAssetsTab,
+                )
                 else -> Unit
             }
         },
+    )
+}
+
+@Composable
+private fun SpecialAssetsTabRow(
+    selectedTab: SpecialAssetsTab,
+    onSelectedTab: (SpecialAssetsTab) -> Unit,
+) {
+    val masksTitle = stringResource(R.string.tab_icon_masks)
+    val specialIconsTitle = stringResource(R.string.tab_special_icons)
+    val tabs = remember(masksTitle, specialIconsTitle) { listOf(masksTitle, specialIconsTitle) }
+    TabRow(
+        tabs = tabs,
+        selectedTabIndex = selectedTab.ordinal,
+        onTabSelected = { index -> onSelectedTab(SpecialAssetsTab.entries[index]) },
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 6.dp),
     )
 }
 
@@ -408,7 +394,7 @@ private fun InfoTabRow(
         onTabSelected = { index -> onSelectedTab(InfoTab.entries[index]) },
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start=16.dp, top = 6.dp, end=16.dp, bottom = 6.dp),
+            .padding(horizontal = 12.dp, vertical = 6.dp),
     )
 }
 
@@ -582,6 +568,75 @@ private fun IconSortMenu(
 }
 
 @Composable
+private fun IconFilterMenu(
+    preferences: IconPreferences,
+    onPreferences: (IconPreferences) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    ListPopupColumn {
+        DropdownImpl(
+            item = DropdownItem(text = stringResource(R.string.show_local_apps)),
+            optionSize = IconFilterOptionCount,
+            isSelected = preferences.showLocalApps,
+            index = 0,
+            isFirst = true,
+            isLast = false,
+            onSelectedIndexChange = {
+                onPreferences(preferences.copy(showLocalApps = !preferences.showLocalApps))
+                onDismiss()
+            },
+        )
+        DropdownImpl(
+            item = DropdownItem(text = stringResource(R.string.show_system_apps)),
+            optionSize = IconFilterOptionCount,
+            isSelected = preferences.showSystemApps,
+            index = 1,
+            isFirst = false,
+            isLast = false,
+            onSelectedIndexChange = {
+                onPreferences(preferences.copy(showSystemApps = !preferences.showSystemApps))
+                onDismiss()
+            },
+        )
+        PopupGroupDivider()
+        DropdownImpl(
+            item = DropdownItem(text = stringResource(R.string.only_show_multiple_styles)),
+            optionSize = IconFilterOptionCount,
+            isSelected = preferences.onlyShowMultipleStyles,
+            index = 2,
+            isFirst = false,
+            isLast = false,
+            onSelectedIndexChange = {
+                onPreferences(
+                    preferences.copy(
+                        onlyShowMultipleStyles = !preferences.onlyShowMultipleStyles,
+                        onlyShowUnadaptedIcons = false,
+                    ),
+                )
+                onDismiss()
+            },
+        )
+        DropdownImpl(
+            item = DropdownItem(text = stringResource(R.string.only_show_unadapted_icons)),
+            optionSize = IconFilterOptionCount,
+            isSelected = preferences.onlyShowUnadaptedIcons,
+            index = 3,
+            isFirst = false,
+            isLast = true,
+            onSelectedIndexChange = {
+                onPreferences(
+                    preferences.copy(
+                        onlyShowUnadaptedIcons = !preferences.onlyShowUnadaptedIcons,
+                        onlyShowMultipleStyles = false,
+                    ),
+                )
+                onDismiss()
+            },
+        )
+    }
+}
+
+@Composable
 private fun PopupGroupDivider() {
     HorizontalDivider(
         modifier = Modifier
@@ -591,7 +646,8 @@ private fun PopupGroupDivider() {
 }
 
 private const val IconSortOptionCount = 3
-private const val IconOptionsMenuCount = 6
+private const val IconFilterOptionCount = 4
+private const val IconOptionsMenuCount = 2
 private const val ProjectSortOptionCount = 3
 
 @Composable
@@ -627,7 +683,7 @@ fun MainBottomBar(
                         onClick = {},
                     )
                     .padding(bottom = 12.dp + navigationBarBottomPadding()),
-                selectedIndex = { pagerState.targetPage.coerceIn(items.indices) },
+                selectedIndex = { pagerState.currentPage },
                 onSelected = { index -> onSelect(items[index].first) },
                 backdrop = floatingBackdrop,
                 tabsCount = items.size,

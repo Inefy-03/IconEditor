@@ -6,21 +6,25 @@ import android.content.Context
 import android.net.Uri
 import android.widget.Toast
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -36,18 +40,36 @@ import com.bocchi.iconeditor.model.ExportProgress
 import com.bocchi.iconeditor.model.ImportPhase
 import com.bocchi.iconeditor.model.ImportProgress
 import top.yukonga.miuix.kmp.basic.Button
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.extended.Close
+import top.yukonga.miuix.kmp.overlay.OverlayBottomSheet
+import top.yukonga.miuix.kmp.overlay.OverlayDialog
+import top.yukonga.miuix.kmp.squircle.squircleSurface
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
 fun ImportProgressOverlay(progress: ImportProgress?) {
     if (progress == null) return
-    TaskProgressOverlay(
+    OverlayDialog(
+        show = true,
         title = importProgressLabel(progress),
-        detail = null,
-        logs = emptyList(),
-        fraction = progress.fraction,
-    )
+        onDismissRequest = null,
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            ProgressBar(fraction = progress.fraction)
+            Text(
+                text = "${(progress.fraction * 100).toInt()}%",
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            )
+        }
+    }
 }
 
 @Composable
@@ -59,198 +81,240 @@ fun ExportProgressOverlay(
     onOpenDirectory: (() -> Unit)? = null,
 ) {
     if (progress == null) return
-    TaskProgressOverlay(
-        title = exportProgressLabel(progress),
-        detail = progress.detail.takeIf { it.isNotBlank() },
+    if (!progress.finished) {
+        ActiveExportDialog(progress = progress)
+        return
+    }
+
+    var showResult by remember { mutableStateOf(true) }
+    var showLogs by remember { mutableStateOf(false) }
+    var dismissalFinished by remember { mutableStateOf(false) }
+    val latestOnDismiss by rememberUpdatedState(onDismiss)
+
+    fun requestDismiss() {
+        showLogs = false
+        showResult = false
+    }
+
+    LaunchedEffect(showResult, dismissalFinished) {
+        if (!showResult && dismissalFinished) {
+            latestOnDismiss()
+        }
+    }
+
+    val canInstall = progress.success && installUri != null && onInstall != null
+    OverlayDialog(
+        show = showResult,
+        title = stringResource(
+            if (progress.success) R.string.export_phase_done else R.string.export_phase_failed,
+        ),
+        summary = when {
+            canInstall -> stringResource(R.string.export_apk_install_summary)
+            !progress.success -> progress.detail.takeIf { it.isNotBlank() }
+            else -> null
+        },
+        onDismissRequest = ::requestDismiss,
+        onDismissFinished = { dismissalFinished = true },
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Button(
+                modifier = Modifier.fillMaxWidth(),
+                enabled = progress.logs.isNotEmpty(),
+                onClick = { showLogs = true },
+            ) {
+                Text(stringResource(R.string.export_view_logs))
+            }
+            if (canInstall) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Button(
+                        modifier = Modifier.weight(1f),
+                        onClick = ::requestDismiss,
+                    ) {
+                        Text(stringResource(R.string.export_apk_install_no))
+                    }
+                    Button(
+                        modifier = Modifier.weight(1f),
+                        onClick = { onInstall(requireNotNull(installUri)) },
+                    ) {
+                        Text(stringResource(R.string.export_apk_install_yes))
+                    }
+                }
+            }
+            if (progress.success && onOpenDirectory != null) {
+                Button(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = onOpenDirectory,
+                ) {
+                    Text(stringResource(R.string.export_open_directory))
+                }
+            }
+            if (!canInstall) {
+                Button(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = ::requestDismiss,
+                ) {
+                    Text(
+                        stringResource(
+                            if (progress.success) {
+                                R.string.export_close_success
+                            } else {
+                                R.string.export_close
+                            },
+                        ),
+                    )
+                }
+            }
+        }
+    }
+    ExportLogSheet(
+        show = showLogs,
         logs = progress.logs,
-        fraction = progress.fraction,
-        finished = progress.finished,
-        success = progress.success,
-        onDismiss = onDismiss,
-        installUri = installUri.takeIf { progress.finished && progress.success },
-        onInstall = onInstall,
-        onOpenDirectory = onOpenDirectory.takeIf { progress.finished && progress.success },
-        allowCopyLogs = true,
+        onDismiss = { showLogs = false },
     )
 }
 
 @Composable
-private fun TaskProgressOverlay(
-    title: String,
-    detail: String?,
-    logs: List<String>,
-    fraction: Float,
-    finished: Boolean = false,
-    success: Boolean = false,
-    onDismiss: (() -> Unit)? = null,
-    installUri: Uri? = null,
-    onInstall: ((Uri) -> Unit)? = null,
-    onOpenDirectory: (() -> Unit)? = null,
-    allowCopyLogs: Boolean = false,
-) {
-    val context = LocalContext.current
-    val logScrollState = rememberScrollState()
-    // 瞬时滚到底，避免 animateScrollTo 与频繁布局叠加导致抖动
-    LaunchedEffect(logs.size, logs.lastOrNull()) {
-        if (logs.isNotEmpty()) {
-            logScrollState.scrollTo(logScrollState.maxValue)
-        }
-    }
-    Box(
-        Modifier
-            .fillMaxSize()
-            .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.35f)),
-        contentAlignment = Alignment.Center,
+private fun ActiveExportDialog(progress: ExportProgress) {
+    OverlayDialog(
+        show = true,
+        title = stringResource(R.string.export_progress_title),
+        onDismissRequest = null,
     ) {
         Column(
-            modifier = Modifier
-                .width(340.dp)
-                .clip(RoundedCornerShape(16.dp))
-                .background(MiuixTheme.colorScheme.surfaceContainer)
-                .padding(horizontal = 20.dp, vertical = 18.dp),
+            modifier = Modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            LiveLogPanel(logs = progress.logs)
             Text(
-                text = title,
-                maxLines = 1,
+                text = exportProgressLabel(progress),
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
-            // 固定详情区高度，避免 detail 变长时整窗上移
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(if (allowCopyLogs) 36.dp else if (!detail.isNullOrBlank()) 36.dp else 0.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                if (!detail.isNullOrBlank()) {
-                    Text(
-                        text = detail,
-                        fontSize = 13.sp,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
-            ImportProgressBar(fraction = fraction)
+            ProgressBar(fraction = progress.fraction)
             Text(
-                text = "${(fraction * 100).toInt()}%",
+                text = "${(progress.fraction * 100).toInt()}%",
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             )
-            if (allowCopyLogs || logs.isNotEmpty()) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(180.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(MiuixTheme.colorScheme.surfaceContainerHigh)
-                        .verticalScroll(logScrollState)
-                        .padding(horizontal = 10.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    if (logs.isEmpty()) {
-                        Text(
-                            text = "…",
-                            fontSize = 11.sp,
-                            lineHeight = 14.sp,
-                            fontFamily = FontFamily.Monospace,
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.45f),
-                        )
-                    } else {
-                        logs.takeLast(48).forEach { line ->
-                            Text(
-                                text = line,
-                                fontSize = 11.sp,
-                                lineHeight = 14.sp,
-                                fontFamily = FontFamily.Monospace,
-                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                            )
-                        }
-                    }
-                }
-            }
-            if (allowCopyLogs) {
-                Button(
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = logs.isNotEmpty(),
-                    onClick = {
-                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                        clipboard.setPrimaryClip(
-                            ClipData.newPlainText("export-log", logs.joinToString("\n")),
-                        )
-                        Toast.makeText(
-                            context,
-                            context.getString(R.string.export_copy_logs_done),
-                            Toast.LENGTH_SHORT,
-                        ).show()
-                    },
-                ) {
-                    Text(stringResource(R.string.export_copy_logs))
-                }
-            }
-            if (finished && onDismiss != null) {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    if (success && installUri != null && onInstall != null) {
-                        Text(
-                            text = stringResource(R.string.export_apk_install_summary),
-                            fontSize = 13.sp,
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            Button(
-                                modifier = Modifier.weight(1f),
-                                onClick = onDismiss,
-                            ) {
-                                Text(stringResource(R.string.export_apk_install_no))
-                            }
-                            Button(
-                                modifier = Modifier.weight(1f),
-                                onClick = { onInstall(installUri) },
-                            ) {
-                                Text(stringResource(R.string.export_apk_install_yes))
-                            }
-                        }
-                        if (onOpenDirectory != null) {
-                            Button(
-                                modifier = Modifier.fillMaxWidth(),
-                                onClick = onOpenDirectory,
-                            ) {
-                                Text(stringResource(R.string.export_open_directory))
-                            }
-                        }
-                    } else {
-                        if (success && onOpenDirectory != null) {
-                            Button(
-                                modifier = Modifier.fillMaxWidth(),
-                                onClick = onOpenDirectory,
-                            ) {
-                                Text(stringResource(R.string.export_open_directory))
-                            }
-                        }
-                        Button(onClick = onDismiss) {
-                            Text(
-                                text = if (success) {
-                                    stringResource(R.string.export_close_success)
-                                } else {
-                                    stringResource(R.string.export_close)
-                                },
-                            )
-                        }
-                    }
-                }
+        }
+    }
+}
+
+@Composable
+private fun LiveLogPanel(logs: List<String>) {
+    val scrollState = rememberScrollState()
+    LaunchedEffect(logs.size, logs.lastOrNull()) {
+        if (logs.isNotEmpty()) {
+            scrollState.scrollTo(scrollState.maxValue)
+        }
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(180.dp)
+            .squircleSurface(MiuixTheme.colorScheme.surfaceContainerHigh, 8.dp)
+            .verticalScroll(scrollState)
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        if (logs.isEmpty()) {
+            LogLine(
+                text = "…",
+                colorAlpha = 0.45f,
+            )
+        } else {
+            logs.takeLast(48).forEach { line ->
+                LogLine(text = line)
             }
         }
     }
+}
+
+@Composable
+private fun ExportLogSheet(
+    show: Boolean,
+    logs: List<String>,
+    onDismiss: () -> Unit,
+) {
+    val context = LocalContext.current
+    val scrollState = rememberScrollState()
+    LaunchedEffect(show, logs.size) {
+        if (show && logs.isNotEmpty()) {
+            scrollState.scrollTo(scrollState.maxValue)
+        }
+    }
+    OverlayBottomSheet(
+        show = show,
+        title = stringResource(R.string.export_logs_title),
+        startAction = {
+            IconButton(onClick = onDismiss) {
+                Icon(
+                    imageVector = MiuixIcons.Close,
+                    contentDescription = stringResource(R.string.action_close),
+                )
+            }
+        },
+        onDismissRequest = onDismiss,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = navigationBarBottomPadding() + 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 180.dp, max = 520.dp)
+                    .squircleSurface(MiuixTheme.colorScheme.surfaceContainerHigh, 8.dp)
+                    .verticalScroll(scrollState)
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                logs.forEach { line ->
+                    LogLine(text = line)
+                }
+            }
+            Button(
+                modifier = Modifier.fillMaxWidth(),
+                enabled = logs.isNotEmpty(),
+                onClick = {
+                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    clipboard.setPrimaryClip(
+                        ClipData.newPlainText("export-log", logs.joinToString("\n")),
+                    )
+                    Toast.makeText(
+                        context,
+                        context.getString(R.string.export_copy_logs_done),
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                },
+            ) {
+                Text(stringResource(R.string.export_copy_logs))
+            }
+        }
+    }
+}
+
+@Composable
+private fun LogLine(
+    text: String,
+    colorAlpha: Float = 1f,
+) {
+    Text(
+        text = text,
+        fontSize = 11.sp,
+        lineHeight = 14.sp,
+        fontFamily = FontFamily.Monospace,
+        color = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = colorAlpha),
+    )
 }
 
 @Composable
@@ -268,25 +332,22 @@ private fun importProgressLabel(progress: ImportProgress): String = when (progre
 }
 
 @Composable
-private fun exportProgressLabel(progress: ExportProgress): String = when {
-    progress.finished && progress.success -> stringResource(R.string.export_phase_done)
-    progress.finished && !progress.success -> stringResource(R.string.export_phase_failed)
-    progress.phase == ExportPhase.Preparing -> stringResource(R.string.export_phase_preparing)
-    progress.phase == ExportPhase.PackagingIcons -> {
+private fun exportProgressLabel(progress: ExportProgress): String = when (progress.phase) {
+    ExportPhase.Preparing -> stringResource(R.string.export_phase_preparing)
+    ExportPhase.PackagingIcons -> {
         if (progress.total > 0) {
             stringResource(R.string.export_phase_packaging_icons, progress.current, progress.total)
         } else {
             stringResource(R.string.export_phase_preparing)
         }
     }
-    progress.phase == ExportPhase.WritingArchive -> stringResource(R.string.export_phase_writing_archive)
-    progress.phase == ExportPhase.Signing -> stringResource(R.string.export_phase_signing)
-    progress.phase == ExportPhase.Finishing -> stringResource(R.string.export_phase_finishing)
-    else -> stringResource(R.string.export_phase_preparing)
+    ExportPhase.WritingArchive -> stringResource(R.string.export_phase_writing_archive)
+    ExportPhase.Signing -> stringResource(R.string.export_phase_signing)
+    ExportPhase.Finishing -> stringResource(R.string.export_phase_finishing)
 }
 
 @Composable
-private fun ImportProgressBar(fraction: Float) {
+private fun ProgressBar(fraction: Float) {
     val trackColor = MiuixTheme.colorScheme.surfaceContainerHigh
     val indicatorColor = MiuixTheme.colorScheme.primary
     Box(

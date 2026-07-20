@@ -36,6 +36,7 @@ data class ProjectSyncAssetsFingerprint(
     val iconback: String = "",
     val iconmask: String = "",
     val iconupon: String = "",
+    val themeAssets: String = "",
 )
 
 @Serializable

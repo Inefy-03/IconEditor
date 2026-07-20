@@ -1,6 +1,5 @@
 package com.bocchi.iconeditor.ui.component
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -11,11 +10,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -32,6 +29,8 @@ import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Ok
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.squircle.squircleBackground
+import top.yukonga.miuix.kmp.squircle.squircleSurface
 import java.io.File
 
 @Composable
@@ -108,12 +107,19 @@ private fun MaskLayerImportRow(
     onToggle: () -> Unit,
 ) {
     val enabled = item.found
+    val containerColor = MiuixTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.55f)
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(MiuixTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.55f))
-            .then(if (enabled) Modifier.clickable(onClick = onToggle) else Modifier)
+            .then(
+                if (enabled) {
+                    Modifier
+                        .squircleSurface(containerColor, 12.dp)
+                        .clickable(onClick = onToggle)
+                } else {
+                    Modifier.squircleBackground(containerColor, 12.dp)
+                },
+            )
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -151,17 +157,15 @@ private fun MaskLayerImportRow(
 
 @Composable
 private fun MaskImportCheckMark(checked: Boolean, enabled: Boolean) {
+    val color = when {
+        !enabled -> MiuixTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.45f)
+        checked -> MiuixTheme.colorScheme.primary
+        else -> MiuixTheme.colorScheme.surfaceContainerHighest
+    }
     Box(
         modifier = Modifier
             .size(22.dp)
-            .clip(RoundedCornerShape(6.dp))
-            .background(
-                when {
-                    !enabled -> MiuixTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.45f)
-                    checked -> MiuixTheme.colorScheme.primary
-                    else -> MiuixTheme.colorScheme.surfaceContainerHighest
-                },
-            ),
+            .squircleBackground(color, 6.dp),
         contentAlignment = Alignment.Center,
     ) {
         if (checked && enabled) {

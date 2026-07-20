@@ -13,6 +13,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.bocchi.iconeditor.R
 import com.bocchi.iconeditor.data.ApkPackAssets
+import com.bocchi.iconeditor.data.ThemePackAssets
 import com.bocchi.iconeditor.data.IconMappingBridge
 import com.bocchi.iconeditor.data.InvalidIconPackApkException
 import com.bocchi.iconeditor.data.InvalidProjectArchiveException
@@ -94,6 +95,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     var localApps by mutableStateOf<List<LocalAppInfo>>(emptyList())
         private set
     var message by mutableStateOf<AppMessage?>(null)
+        private set
+    var toastMessageText by mutableStateOf<String?>(null)
         private set
     var iconUndoOffer by mutableStateOf<IconUndoOffer?>(null)
         private set
@@ -205,6 +208,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         message = null
     }
 
+    fun clearToastMessage() {
+        toastMessageText = null
+    }
+
     fun dismissIconUndo() {
         iconUndoOffer = null
         repository.clearIconUndoSnapshots()
@@ -228,9 +235,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun restoreTrashProject(id: String) = runAction {
+        val projectName = trashEntries.first { it.project.id == id }.project.name
         repository.restoreProjectFromTrash(id)
         refresh()
-        showMessage(R.string.dialog_notice, getApplication<Application>().getString(R.string.trash_restored))
+        toastMessageText = getApplication<Application>().getString(R.string.trash_restored, projectName)
     }
 
     fun purgeTrashProject(id: String) = runAction {
@@ -557,7 +565,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
             runCatching {
-                val appliedCount = withContext(Dispatchers.IO) {
+                val (appliedCount, loadedIcons) = withContext(Dispatchers.IO) {
                     repository.applyIconImport(
                         projectId = projectId,
                         preview = preview,
@@ -566,12 +574,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     ) { progress ->
                         progressChannel.trySend(progress)
                     }
-                    when (mode) {
+                    val count = when (mode) {
                         IconImportMode.Overwrite -> selectedPackages.size
                         IconImportMode.AddOnly -> preview.items.count { it.selected && !it.conflict }
                     }
+                    count to repository.loadIcons(projectId)
                 }
-                loadProject(projectId, loadIcons = true)
+                icons = loadedIcons
+                apkAssetsRevision++
                 refresh()
                 val message = when (mode) {
                     IconImportMode.Overwrite -> getApplication<Application>().getString(
@@ -596,11 +606,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun deleteProject(id: String) = runAction {
-        repository.deleteProject(id)
+    fun moveProjectToTrash(id: String) = runAction {
+        repository.moveProjectToTrash(id)
         if (selectedProjectId == id) selectedProjectId = null
         refresh()
-        showMessage(R.string.dialog_notice, getApplication<Application>().getString(R.string.trash_moved))
+        toastMessageText = getApplication<Application>().getString(R.string.trash_moved)
+    }
+
+    fun deleteProjectPermanently(id: String) = runAction {
+        repository.deleteProjectPermanently(id)
+        if (selectedProjectId == id) selectedProjectId = null
+        refresh()
     }
 
     fun renameProject(id: String, name: String) = runAction {
@@ -685,6 +701,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         return selectedProjectId?.let { repository.apkMaskLayerFile(it, layer) }
     }
 
+    fun themeDrawableFile(asset: ThemePackAssets.DrawableAsset): File? {
+        apkAssetsRevision
+        return selectedProjectId?.let { repository.themeDrawableFile(it, asset) }
+    }
+
     fun setApkLauncherIcon(uri: Uri) = runAction {
         selectedProjectId?.let {
             repository.setApkLauncherIcon(it, uri)
@@ -712,6 +733,22 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun clearApkMaskLayer(layer: ApkPackAssets.MaskLayer) = runAction {
         selectedProjectId?.let {
             repository.clearApkMaskLayer(it, layer)
+            apkAssetsRevision++
+            refresh()
+        }
+    }
+
+    fun setThemeDrawable(asset: ThemePackAssets.DrawableAsset, uri: Uri) = runAction {
+        selectedProjectId?.let {
+            repository.setThemeDrawable(it, asset, uri)
+            apkAssetsRevision++
+            refresh()
+        }
+    }
+
+    fun clearThemeDrawable(asset: ThemePackAssets.DrawableAsset) = runAction {
+        selectedProjectId?.let {
+            repository.clearThemeDrawable(it, asset)
             apkAssetsRevision++
             refresh()
         }
@@ -745,6 +782,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             val trimmedAppName = appName.trim()
             val original = originalPackageName.trim()
             val aliases = IconMappingBridge.normalizeAliasPackageNames(aliasPackageNames, trimmedPackage)
+            val targetPackages = if (isNew) listOf(trimmedPackage) + aliases else listOf(trimmedPackage)
 
             if (!IconMappingBridge.isValidAndroidPackageName(trimmedPackage)) {
                 error(getApplication<Application>().getString(R.string.icon_edit_invalid_package, trimmedPackage))
@@ -788,8 +826,21 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             if (isNew) {
-                if (existingPackages.contains(trimmedPackage)) {
-                    error(getApplication<Application>().getString(R.string.icon_edit_package_exists, trimmedPackage))
+                val existingTarget = targetPackages.firstOrNull(existingPackages::contains)
+                if (existingTarget != null) {
+                    error(getApplication<Application>().getString(R.string.icon_edit_package_exists, existingTarget))
+                }
+                val aliasedTarget = mapping.entries.firstNotNullOfOrNull { entry ->
+                    targetPackages.firstOrNull(entry.aliasPackageNames::contains)?.let { it to entry.packageName }
+                }
+                if (aliasedTarget != null) {
+                    error(
+                        getApplication<Application>().getString(
+                            R.string.icon_edit_alias_owned,
+                            aliasedTarget.first,
+                            aliasedTarget.second,
+                        ),
+                    )
                 }
                 if (additions.isEmpty()) {
                     error(getApplication<Application>().getString(R.string.icon_edit_need_image))
@@ -839,57 +890,79 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
 
-            var workingSelectedKey = if (isNew || original == trimmedPackage) {
-                selectedVariantKey
+            val normalizedSelectedKeys = if (isNew) {
+                targetPackages.associateWith { targetPackage ->
+                    val addedVariantKeys = additions.map { uri ->
+                        repository.addIconVariant(projectId, targetPackage, uri)
+                    }
+                    val workingSelectedKey = selectedAdditionIndex
+                        ?.let(addedVariantKeys::getOrNull)
+                        ?: addedVariantKeys.firstOrNull()
+                    repository.normalizeIconVariants(
+                        id = projectId,
+                        packageName = targetPackage,
+                        selectedVariantKey = workingSelectedKey,
+                    )
+                }
             } else {
-                selectedVariantKey?.let { selected ->
-                    when {
-                        selected == original -> trimmedPackage
-                        selected.startsWith("${original}_") ->
-                            trimmedPackage + selected.removePrefix(original)
-                        else -> trimmedPackage
+                var workingSelectedKey = if (original == trimmedPackage) {
+                    selectedVariantKey
+                } else {
+                    selectedVariantKey?.let { selected ->
+                        when {
+                            selected == original -> trimmedPackage
+                            selected.startsWith("${original}_") ->
+                                trimmedPackage + selected.removePrefix(original)
+                            else -> trimmedPackage
+                        }
                     }
                 }
+                val addedVariantKeys = additions.map { uri ->
+                    repository.addIconVariant(projectId, trimmedPackage, uri)
+                }
+                workingSelectedKey = selectedAdditionIndex
+                    ?.let(addedVariantKeys::getOrNull)
+                    ?: workingSelectedKey
+                mapOf(
+                    trimmedPackage to repository.normalizeIconVariants(
+                        id = projectId,
+                        packageName = trimmedPackage,
+                        selectedVariantKey = workingSelectedKey,
+                    ),
+                )
             }
 
-            val addedVariantKeys = additions.map { uri ->
-                repository.addIconVariant(projectId, trimmedPackage, uri)
-            }
-            workingSelectedKey = selectedAdditionIndex
-                ?.let(addedVariantKeys::getOrNull)
-                ?: if (isNew) addedVariantKeys.firstOrNull() else workingSelectedKey
-
-            val normalizedSelectedKey = repository.normalizeIconVariants(
-                id = projectId,
-                packageName = trimmedPackage,
-                selectedVariantKey = workingSelectedKey,
-            )
-
-            val catalogName = packageNameRepository.resolveAppName(trimmedPackage, null)
             var nextCustoms = iconPreferences.customAppNames.toMutableMap()
-            if (trimmedAppName != trimmedPackage && trimmedAppName != catalogName) {
-                nextCustoms[trimmedPackage] = trimmedAppName
-            } else {
-                nextCustoms.remove(trimmedPackage)
-            }
             var nextVariants = iconPreferences.selectedVariants.toMutableMap()
-            if (normalizedSelectedKey != null) {
-                nextVariants[trimmedPackage] = normalizedSelectedKey
-            } else {
-                nextVariants.remove(trimmedPackage)
+            normalizedSelectedKeys.forEach { (targetPackage, normalizedSelectedKey) ->
+                val catalogName = packageNameRepository.resolveAppName(targetPackage, null)
+                if (trimmedAppName != targetPackage && trimmedAppName != catalogName) {
+                    nextCustoms[targetPackage] = trimmedAppName
+                } else {
+                    nextCustoms.remove(targetPackage)
+                }
+                if (normalizedSelectedKey != null) {
+                    nextVariants[targetPackage] = normalizedSelectedKey
+                } else {
+                    nextVariants.remove(targetPackage)
+                }
             }
             iconPreferences = iconPreferences.copy(
                 selectedVariants = nextVariants,
                 customAppNames = nextCustoms,
             )
             repository.saveIconPreferences(projectId, iconPreferences)
-            repository.updateIconAliasPackageNames(projectId, trimmedPackage, aliases)
+            repository.updateIconAliasPackageNames(
+                projectId,
+                trimmedPackage,
+                if (isNew) emptyList() else aliases,
+            )
             icons = repository.loadIcons(projectId)
             refresh()
             val alsoRemove = if (!isNew && original.isNotEmpty() && original != trimmedPackage) {
                 listOf(trimmedPackage)
             } else if (isNew) {
-                listOf(trimmedPackage)
+                targetPackages
             } else {
                 emptyList()
             }
@@ -981,18 +1054,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 if (format == ExportFormat.Apk && selectedProjectId == id) {
                     metadata = projectMetadata[id] ?: repository.loadMetadata(id)
                 }
-                val message = if (locationLabel.isNotBlank()) {
-                    getApplication<Application>().getString(R.string.export_complete_path, locationLabel)
-                } else {
-                    getApplication<Application>().getString(R.string.export_complete)
-                }
-                exportProgress = (lastProgress ?: ExportProgress(ExportPhase.Finishing)).copy(
-                    phase = ExportPhase.Finishing,
-                    finished = true,
-                    success = true,
-                    detail = message,
-                    logs = (lastProgress?.logs ?: emptyList()) + message,
-                )
                 if (format == ExportFormat.Apk) {
                     val installUri = withContext(Dispatchers.IO) {
                         runCatching { repository.prepareInstallableApkUri(target) }
@@ -1002,6 +1063,19 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         target
                     }
                 }
+                val message = if (locationLabel.isNotBlank()) {
+                    getApplication<Application>().getString(R.string.export_complete_path, locationLabel)
+                } else {
+                    getApplication<Application>().getString(R.string.export_complete)
+                }
+                toastMessageText = message
+                exportProgress = (lastProgress ?: ExportProgress(ExportPhase.Finishing)).copy(
+                    phase = ExportPhase.Finishing,
+                    finished = true,
+                    success = true,
+                    detail = "",
+                    logs = (lastProgress?.logs ?: emptyList()) + message,
+                )
             }.onFailure { error ->
                 if (error is CancellationException) throw error
                 val summary = error.message?.takeIf { it.isNotBlank() }
@@ -1196,11 +1270,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                             syncServerToken = token,
                             syncServerWanted = true,
                         ),
-                    )
-                    syncStatusMessage = getApplication<Application>().getString(
-                        R.string.sync_server_running,
-                        syncLanAddress ?: "0.0.0.0",
-                        syncServerPort,
                     )
                 }
                 if (hasSyncPeerConfigured()) {

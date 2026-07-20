@@ -94,9 +94,77 @@ object ArchiveService {
 
     fun createDefaultWorkspace(workDir: File) {
         File(workDir, "icons/res/drawable-xxhdpi").mkdirs()
-        File(workDir, "icons/transform_config.xml").writeText("<transform_config />\n")
+        File(workDir, ThemePackAssets.TRANSFORM_CONFIG_PATH).writeText(DefaultTransformConfig)
         File(workDir, "customize.sh").writeText(defaultCustomize(emptyList()))
         File(workDir, "post-fs-data.sh").writeText("#!/sbin/sh\n")
+    }
+
+    fun syncIconMaskTransformConfig(workDir: File): Boolean {
+        val configFile = File(workDir, ThemePackAssets.TRANSFORM_CONFIG_PATH)
+        val customMaskFile = File(workDir, ThemePackAssets.MtzMaskLayer.Mask.relativePath)
+        val sourceDocument = if (configFile.isFile) {
+            configFile.inputStream().use(::parseXml)
+        } else {
+            parseXml(DefaultTransformConfig.byteInputStream())
+        }
+        val sourceRoot = sourceDocument.documentElement
+        val legacyPlaceholder = sourceRoot.tagName == "transform_config" &&
+            (0 until sourceRoot.childNodes.length).none { sourceRoot.childNodes.item(it) is Element }
+        val document = if (legacyPlaceholder) {
+            parseXml(DefaultTransformConfig.byteInputStream())
+        } else {
+            sourceDocument
+        }
+        val root = document.documentElement
+        val maskConfigs = document.getElementsByTagName("Config").let { nodes ->
+            (0 until nodes.length).mapNotNull { index ->
+                (nodes.item(index) as? Element)
+                    ?.takeIf { it.getAttribute("name") == IconMaskConfigName }
+            }
+        }
+        var changed = !configFile.isFile || legacyPlaceholder
+        if (customMaskFile.isFile) {
+            maskConfigs.forEach { config ->
+                config.parentNode.removeChild(config)
+                changed = true
+            }
+        } else {
+            val maskConfig = maskConfigs.firstOrNull()
+            if (maskConfig == null) {
+                root.appendChild(
+                    document.createElement("Config").apply {
+                        setAttribute("name", IconMaskConfigName)
+                        setAttribute("value", DefaultIconMaskPath)
+                    },
+                )
+                changed = true
+            } else {
+                if (maskConfig.getAttribute("value") != DefaultIconMaskPath) {
+                    maskConfig.setAttribute("value", DefaultIconMaskPath)
+                    changed = true
+                }
+                maskConfigs.drop(1).forEach { duplicate ->
+                    duplicate.parentNode.removeChild(duplicate)
+                    changed = true
+                }
+            }
+        }
+        if (!changed) return false
+
+        configFile.parentFile?.mkdirs()
+        val staged = File(configFile.parentFile, ".transform-${UUID.randomUUID()}.xml")
+        try {
+            staged.outputStream().buffered().use { output ->
+                TransformerFactory.newInstance().newTransformer().apply {
+                    setOutputProperty(OutputKeys.INDENT, "yes")
+                    setOutputProperty(OutputKeys.ENCODING, "UTF-8")
+                }.transform(DOMSource(document), StreamResult(output))
+            }
+            moveFile(staged, configFile)
+        } finally {
+            staged.delete()
+        }
+        return true
     }
 
     fun scanIconAssets(workDir: File): List<IconAsset> {
@@ -122,7 +190,7 @@ object ArchiveService {
                     lastModified = file.lastModified(),
                 )
             }
-            .filter { it.packageName !in ApkPackAssets.MaskLayer.resourceNames }
+            .filter { it.packageName !in ThemePackAssets.reservedDrawableNames }
             .sortedBy { it.packageName }
             .toList()
     }
@@ -148,14 +216,14 @@ object ArchiveService {
                     lastModified = file.lastModified(),
                 )
             }
-            .filter { it.packageName !in ApkPackAssets.MaskLayer.resourceNames }
+            .filter { it.packageName !in ThemePackAssets.reservedDrawableNames }
             .sortedBy { it.packageName }
             .toList()
     }
 
     /** Fast path for sync: list files for one package without decoding image bounds. */
     fun listIconFiles(workDir: File, packageName: String): List<File> {
-        if (packageName.isBlank() || packageName in ApkPackAssets.MaskLayer.resourceNames) return emptyList()
+        if (packageName.isBlank() || packageName in ThemePackAssets.reservedDrawableNames) return emptyList()
         val iconRoot = File(workDir, "icons/res/drawable-xxhdpi")
         if (!iconRoot.isDirectory) return emptyList()
         return iconRoot.listFiles()
@@ -517,12 +585,22 @@ object ArchiveService {
         output: File,
         reporter: ExportProgressReporter = ExportProgressReporter.NOOP,
     ) {
+        syncIconMaskTransformConfig(workDir)
         ZipFile(baseIcons).use { source ->
             ZipOutputStream(output.outputStream().buffered()).use { zip ->
                 source.entries().asSequence().forEach { entry ->
-                    if (entry.isDirectory || !entry.name.startsWith(EditableIconDirectory)) {
+                    if (
+                        entry.name != NestedTransformConfigPath &&
+                        (entry.isDirectory || !entry.name.startsWith(EditableIconDirectory))
+                    ) {
                         zip.copyEntry(source, entry)
                     }
+                }
+                val transformConfig = File(workDir, ThemePackAssets.TRANSFORM_CONFIG_PATH)
+                if (transformConfig.isFile) {
+                    zip.writeEntry(NestedTransformConfigPath, transformConfig.readBytes())
+                } else {
+                    source.getEntry(NestedTransformConfigPath)?.let { zip.copyEntry(source, it) }
                 }
                 val editableIcons = File(workDir, "icons/$EditableIconDirectory")
                 if (editableIcons.exists()) {
@@ -757,6 +835,28 @@ object ArchiveService {
 
     private val CustomizeMessages = Regex("""(?m)^(?:ui_print \"[^\r\n]*\"\r?\n)+""")
     private const val EditableIconDirectory = "res/drawable-xxhdpi/"
+    private const val NestedTransformConfigPath = "transform_config.xml"
+    private const val IconMaskConfigName = "ConfigIconMask"
+    private const val DefaultIconMaskPath =
+        "M0,42.67C0,27.73 0,20.26 2.91,14.56C5.47,9.54 9.54,5.47 14.56,2.91" +
+            "C20.26,0 27.74,0 42.67,0L57.33,0C72.26,0 79.74,0 85.44,2.91" +
+            "C90.46,5.47 94.53,9.54 97.09,14.56C100,20.26 100,27.73 100,42.67" +
+            "L100,57.33C100,72.27 100,79.74 97.09,85.44C94.53,90.46 90.46,94.53 85.44,97.09" +
+            "C79.74,100 72.26,100 57.33,100L42.67,100C27.74,100 20.26,100 14.56,97.09" +
+            "C9.54,94.53 5.47,90.46 2.91,85.44C0,79.74 0,72.27 0,57.33L0,42.67Z"
+
+    private val DefaultTransformConfig = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <IconTransform>
+            <PointsMapping>
+                <Point fromX="0" fromY="0" toX="-4" toY="-4"/>
+                <Point fromX="0" fromY="90" toX="-4" toY="94"/>
+                <Point fromX="90" fromY="90" toX="94" toY="94"/>
+                <Point fromX="90" fromY="0" toX="94" toY="-4"/>
+            </PointsMapping>
+            <Config name="$IconMaskConfigName" value="$DefaultIconMaskPath" />
+        </IconTransform>
+    """.trimIndent() + "\n"
 
     private const val MtzDescriptionTemplate = """<?xml version="1.0" encoding="UTF-8"?><theme>
 <version><![CDATA[]]></version>

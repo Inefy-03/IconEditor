@@ -1,7 +1,3 @@
-<p align="left">
-  <a href="README.en.md">English</a>
-</p>
-
 <p align="center">
   <img src="app/src/main/ic_launcher-playstore.png" alt="IconEditor 应用图标" width="128">
 </p>
@@ -10,6 +6,10 @@
 
 <p align="center">
   一个 MTZ、Module 与 APK 图标包编辑器
+</p>
+
+<p align="center">
+  <a href="README.en.md">English</a>
 </p>
 
 IconEditor 采用 [Miuix](https://github.com/compose-miuix-ui/miuix) 设计，用于创建、导入、编辑和导出图标包项目，支持 MIUI/HyperOS `.mtz` 主题、Module `.zip` 图标包，以及第三方桌面使用的标准图标包 `.apk`。

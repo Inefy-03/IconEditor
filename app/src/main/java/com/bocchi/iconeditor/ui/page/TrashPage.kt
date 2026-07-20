@@ -1,10 +1,14 @@
 package com.bocchi.iconeditor.ui.page
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -18,6 +22,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -27,12 +33,14 @@ import com.bocchi.iconeditor.model.TrashEntry
 import com.bocchi.iconeditor.ui.component.EmptyState
 import top.yukonga.miuix.kmp.basic.Button
 import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Delete
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
+import top.yukonga.miuix.kmp.utils.scrollEndHaptic
 import java.text.DateFormat
 import java.util.Date
 
@@ -50,79 +58,114 @@ fun TrashPage(
         DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT)
     }
 
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-        val emptyHeight = (
-            maxHeight - contentPadding.calculateTopPadding() - contentPadding.calculateBottomPadding()
-            ).coerceAtLeast(0.dp)
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .overScrollVertical(),
-            contentPadding = contentPadding,
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            overscrollEffect = null,
-        ) {
+    val layoutDirection = LocalLayoutDirection.current
+    Scaffold(
+        modifier = Modifier.fillMaxSize(),
+        containerColor = Color.Transparent,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        bottomBar = {
             if (entries.isNotEmpty()) {
-                item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MiuixTheme.colorScheme.surface)
+                        .padding(
+                            start = 12.dp,
+                            top = 12.dp,
+                            end = 12.dp,
+                            bottom = contentPadding.calculateBottomPadding(),
+                        ),
+                ) {
                     Button(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 12.dp),
+                            .height(TrashActionHeight),
                         onClick = { confirmEmpty = true },
                     ) {
                         Text(stringResource(R.string.action_empty_trash))
                     }
                 }
             }
-            if (entries.isEmpty()) {
-                item {
-                    EmptyState(
-                        text = stringResource(R.string.trash_empty),
-                        icon = MiuixIcons.Delete,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(emptyHeight),
-                    )
-                }
+        },
+    ) { scaffoldPadding ->
+        val listContentPadding = PaddingValues(
+            start = contentPadding.calculateStartPadding(layoutDirection),
+            top = contentPadding.calculateTopPadding(),
+            end = contentPadding.calculateEndPadding(layoutDirection),
+            bottom = if (entries.isEmpty()) {
+                contentPadding.calculateBottomPadding()
             } else {
-                items(entries, key = { it.project.id }) { entry ->
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp),
-                        insideMargin = PaddingValues(16.dp),
-                    ) {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(
-                                entry.project.name,
-                                style = MiuixTheme.textStyles.title4,
-                                fontWeight = FontWeight.Medium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            Text(
-                                stringResource(
-                                    R.string.trash_deleted_at,
-                                    dateFormat.format(Date(entry.deletedAt)),
-                                ),
-                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                                style = MiuixTheme.textStyles.subtitle,
-                            )
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                Button(
-                                    modifier = Modifier.weight(1f),
-                                    onClick = { onRestore(entry.project.id) },
+                scaffoldPadding.calculateBottomPadding()
+            },
+        )
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            val emptyHeight = (
+                maxHeight - listContentPadding.calculateTopPadding() -
+                    listContentPadding.calculateBottomPadding()
+                ).coerceAtLeast(0.dp)
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .scrollEndHaptic()
+                    .overScrollVertical(),
+                contentPadding = listContentPadding,
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                overscrollEffect = null,
+            ) {
+                if (entries.isEmpty()) {
+                    item {
+                        EmptyState(
+                            text = stringResource(R.string.trash_empty),
+                            icon = MiuixIcons.Delete,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(emptyHeight),
+                        )
+                    }
+                } else {
+                    items(entries, key = { it.project.id }) { entry ->
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp),
+                            insideMargin = PaddingValues(16.dp),
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(
+                                    entry.project.name,
+                                    style = MiuixTheme.textStyles.title4,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Text(
+                                    stringResource(
+                                        R.string.trash_deleted_at,
+                                        dateFormat.format(Date(entry.deletedAt)),
+                                    ),
+                                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                    style = MiuixTheme.textStyles.subtitle,
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 ) {
-                                    Text(stringResource(R.string.action_restore))
-                                }
-                                Button(
-                                    modifier = Modifier.weight(1f),
-                                    onClick = { purgeTarget = entry },
-                                ) {
-                                    Text(stringResource(R.string.action_purge))
+                                    Button(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(TrashActionHeight),
+                                        onClick = { onRestore(entry.project.id) },
+                                    ) {
+                                        Text(stringResource(R.string.action_restore))
+                                    }
+                                    Button(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(TrashActionHeight),
+                                        onClick = { purgeTarget = entry },
+                                    ) {
+                                        Text(stringResource(R.string.action_purge))
+                                    }
                                 }
                             }
                         }
@@ -141,11 +184,18 @@ fun TrashPage(
         onDismissRequest = { purgeTarget = null },
     ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Button(modifier = Modifier.weight(1f), onClick = { purgeTarget = null }) {
+            Button(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(TrashActionHeight),
+                onClick = { purgeTarget = null },
+            ) {
                 Text(stringResource(R.string.action_cancel))
             }
             Button(
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .height(TrashActionHeight),
                 onClick = {
                     purgeTarget?.let { onPurge(it.project.id) }
                     purgeTarget = null
@@ -163,11 +213,18 @@ fun TrashPage(
         onDismissRequest = { confirmEmpty = false },
     ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Button(modifier = Modifier.weight(1f), onClick = { confirmEmpty = false }) {
+            Button(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(TrashActionHeight),
+                onClick = { confirmEmpty = false },
+            ) {
                 Text(stringResource(R.string.action_cancel))
             }
             Button(
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .height(TrashActionHeight),
                 onClick = {
                     confirmEmpty = false
                     onEmpty()
@@ -178,3 +235,5 @@ fun TrashPage(
         }
     }
 }
+
+private val TrashActionHeight = 48.dp

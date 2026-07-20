@@ -3,6 +3,7 @@ package com.bocchi.iconeditor.data
 import android.content.ContentResolver
 import android.content.ContentValues
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.os.Environment
 import android.provider.DocumentsContract
@@ -41,13 +42,13 @@ object ExportDirectoryHelper {
     fun displayLabel(context: Context, settings: AppSettings): String {
         val custom = settings.exportDirectoryUri.takeIf { it.isNotBlank() }?.let(Uri::parse)
             ?: return context.getString(R.string.export_directory_download_default)
-        return runCatching {
+        val relativePath = runCatching {
             val documentId = DocumentsContract.getTreeDocumentId(custom)
-            documentId.substringAfter(':', documentId).ifBlank {
-                context.getString(R.string.export_directory_download_default)
-            }
+            documentId.substringAfter(':', documentId)
         }.getOrDefault(custom.lastPathSegment.orEmpty())
-            .ifBlank { context.getString(R.string.export_directory_download_default) }
+            .substringAfter(':')
+            .trim('/')
+        return if (relativePath.isBlank()) "/" else "/$relativePath"
     }
 
     fun createExportTarget(
@@ -80,6 +81,8 @@ object ExportDirectoryHelper {
     }.getOrNull()
 
     fun describeExportLocation(context: Context, settings: AppSettings, uri: Uri, fallbackName: String): String {
+        documentRelativePath(uri)?.let { return "/$it" }
+        queryMediaRelativePath(context.contentResolver, uri)?.let { return "/$it" }
         val folder = displayLabel(context, settings)
         val name = queryDisplayName(context.contentResolver, uri).ifBlank { fallbackName }
         return "$folder/$name"
@@ -93,10 +96,14 @@ object ExportDirectoryHelper {
         context.contentResolver.update(uri, values, null, null)
     }
 
-    /** Best-effort open of the configured export folder (or Downloads). */
-    fun openExportDirectory(context: Context, settings: AppSettings): Boolean {
+    /** Opens the actual parent directory when the exported document exposes one. */
+    fun openExportDirectory(
+        context: Context,
+        settings: AppSettings,
+        exportedUri: Uri? = null,
+    ): Boolean {
         val customTree = settings.exportDirectoryUri.takeIf { it.isNotBlank() }?.let(Uri::parse)
-        val folderUri = if (customTree != null) {
+        val folderUri = exportedUri?.let(::parentDocumentUri) ?: if (customTree != null) {
             DocumentsContract.buildDocumentUriUsingTree(
                 customTree,
                 DocumentsContract.getTreeDocumentId(customTree),
@@ -104,20 +111,30 @@ object ExportDirectoryHelper {
         } else {
             defaultDownloadsDocumentUri
         }
-        val viewOk = runCatching {
-            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
-                setDataAndType(folderUri, DocumentsContract.Document.MIME_TYPE_DIR)
-                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            context.startActivity(intent)
-        }.isSuccess
-        if (viewOk) return true
+        if (startDirectoryViewer(context, folderUri, XiaomiFileManagerPackage)) return true
+
+        val baseViewIntent = directoryViewIntent(folderUri)
+        val viewerPackages = context.packageManager
+            .queryIntentActivities(baseViewIntent, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY)
+            .asSequence()
+            .map { it.activityInfo.packageName }
+            .filterNot { it.contains("downloads", ignoreCase = true) }
+            .distinct()
+            .toList()
+        viewerPackages.forEach { packageName ->
+            if (startDirectoryViewer(context, folderUri, packageName)) return true
+        }
+
         return runCatching {
-            val intent = android.content.Intent(android.app.DownloadManager.ACTION_VIEW_DOWNLOADS).apply {
-                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            context.startActivity(intent)
+            context.startActivity(
+                Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                    type = "*/*"
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    putExtra(DocumentsContract.EXTRA_INITIAL_URI, folderUri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                },
+            )
         }.isSuccess
     }
 
@@ -159,6 +176,59 @@ object ExportDirectoryHelper {
             }
         }
         return uri.lastPathSegment.orEmpty()
+    }
+
+    private fun queryMediaRelativePath(resolver: ContentResolver, uri: Uri): String? = runCatching {
+        resolver.query(
+            uri,
+            arrayOf(MediaStore.MediaColumns.RELATIVE_PATH, MediaStore.MediaColumns.DISPLAY_NAME),
+            null,
+            null,
+            null,
+        )?.use { cursor ->
+            if (!cursor.moveToFirst()) return@use null
+            val pathIndex = cursor.getColumnIndex(MediaStore.MediaColumns.RELATIVE_PATH)
+            val nameIndex = cursor.getColumnIndex(MediaStore.MediaColumns.DISPLAY_NAME)
+            val path = if (pathIndex >= 0) cursor.getString(pathIndex).orEmpty().trim('/') else ""
+            val name = if (nameIndex >= 0) cursor.getString(nameIndex).orEmpty() else ""
+            listOf(path, name).filter { it.isNotBlank() }.joinToString("/").takeIf { it.isNotBlank() }
+        }
+    }.getOrNull()
+
+    private fun documentRelativePath(uri: Uri): String? = runCatching {
+        if (uri.authority != ExternalStorageDocumentsAuthority) return@runCatching null
+        DocumentsContract.getDocumentId(uri)
+            .substringAfter(':')
+            .removePrefix("/storage/emulated/0/")
+            .trim('/')
+            .takeIf { it.isNotBlank() }
+    }.getOrNull()
+
+    private fun parentDocumentUri(uri: Uri): Uri? = runCatching {
+        val authority = uri.authority ?: return@runCatching null
+        if (DocumentsContract.isTreeUri(uri)) {
+            return@runCatching DocumentsContract.buildDocumentUriUsingTree(
+                uri,
+                DocumentsContract.getTreeDocumentId(uri),
+            )
+        }
+        if (authority != ExternalStorageDocumentsAuthority) return@runCatching null
+        val documentId = DocumentsContract.getDocumentId(uri)
+        val parentId = documentId.substringBeforeLast('/', missingDelimiterValue = documentId)
+        if (parentId == documentId) return@runCatching null
+        DocumentsContract.buildDocumentUri(authority, parentId)
+    }.getOrNull()
+
+    private fun directoryViewIntent(folderUri: Uri): Intent = Intent(Intent.ACTION_VIEW).apply {
+        setDataAndType(folderUri, DocumentsContract.Document.MIME_TYPE_DIR)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+
+    private fun startDirectoryViewer(context: Context, folderUri: Uri, packageName: String): Boolean {
+        val intent = directoryViewIntent(folderUri).setPackage(packageName)
+        if (context.packageManager.resolveActivity(intent, 0) == null) return false
+        return runCatching { context.startActivity(intent) }.isSuccess
     }
 
     private fun createInTree(
@@ -243,4 +313,7 @@ object ExportDirectoryHelper {
         return uri.authority == MediaStore.AUTHORITY &&
             uri.pathSegments.any { it == "downloads" }
     }
+
+    private const val XiaomiFileManagerPackage = "com.android.fileexplorer"
+    private const val ExternalStorageDocumentsAuthority = "com.android.externalstorage.documents"
 }

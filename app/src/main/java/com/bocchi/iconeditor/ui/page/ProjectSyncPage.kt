@@ -1,13 +1,20 @@
 package com.bocchi.iconeditor.ui.page
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.graphics.BitmapFactory
+import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -25,10 +32,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import android.graphics.BitmapFactory
 import com.bocchi.iconeditor.R
 import com.bocchi.iconeditor.data.sync.ProjectSyncAction
 import com.bocchi.iconeditor.data.sync.ProjectSyncDiffItem
@@ -39,13 +46,16 @@ import top.yukonga.miuix.kmp.basic.Button
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Ok
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.preference.ArrowPreference
+import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
+import top.yukonga.miuix.kmp.utils.scrollEndHaptic
+import top.yukonga.miuix.kmp.squircle.squircleBackground
+import top.yukonga.miuix.kmp.squircle.squircleSurface
 
 @Composable
 fun ProjectSyncPage(
@@ -67,95 +77,109 @@ fun ProjectSyncPage(
     onStopServer: () -> Unit,
     onProbe: () -> Unit,
 ) {
+    val context = LocalContext.current
+    val canSavePeer = peerHost.isNotBlank() &&
+        peerPort.toIntOrNull()?.let { it in 1..65535 } == true &&
+        peerToken.isNotBlank()
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
+            .scrollEndHaptic()
             .overScrollVertical(),
-        contentPadding = contentPadding,
+        contentPadding = contentPadding.withScrollableImeSafeArea(),
         overscrollEffect = null,
     ) {
         item { SmallTitle(stringResource(R.string.sync_section_host)) }
         item {
             PreferenceCard(bottom = 6.dp) {
-                if (serverRunning) {
-                    Text(
-                        text = stringResource(
+                SwitchPreference(
+                    title = stringResource(R.string.sync_server_toggle),
+                    summary = if (serverRunning) {
+                        stringResource(
                             R.string.sync_server_running,
                             lanAddress ?: "0.0.0.0",
                             serverPort,
-                        ),
-                        modifier = Modifier.padding(16.dp),
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    )
+                        )
+                    } else {
+                        stringResource(R.string.sync_server_toggle_off)
+                    },
+                    checked = serverRunning,
+                    onCheckedChange = { enabled ->
+                        if (enabled) onStartServer() else onStopServer()
+                    },
+                )
+                if (serverRunning) {
                     Text(
                         text = stringResource(R.string.sync_token_label, serverToken),
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .combinedClickable(
+                                enabled = serverToken.isNotBlank(),
+                                onClick = {},
+                                onLongClick = {
+                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE)
+                                        as ClipboardManager
+                                    clipboard.setPrimaryClip(
+                                        ClipData.newPlainText(
+                                            context.getString(R.string.sync_peer_token),
+                                            serverToken,
+                                        ),
+                                    )
+                                    Toast.makeText(
+                                        context,
+                                        context.getString(R.string.copied_format, serverToken),
+                                        Toast.LENGTH_SHORT,
+                                    ).show()
+                                },
+                            )
+                            .padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    )
-                    ArrowPreference(
-                        title = stringResource(R.string.sync_stop_server),
-                        onClick = onStopServer,
-                    )
-                } else {
-                    Text(
-                        text = stringResource(R.string.sync_host_hint),
-                        modifier = Modifier.padding(16.dp),
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    )
-                    ArrowPreference(
-                        title = stringResource(R.string.sync_start_server),
-                        onClick = onStartServer,
+                        style = MiuixTheme.textStyles.body2,
                     )
                 }
+                Text(
+                    text = stringResource(R.string.sync_host_hint),
+                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    style = MiuixTheme.textStyles.body2,
+                )
             }
         }
 
         item { SmallTitle(stringResource(R.string.sync_section_connect)) }
         item {
             PreferenceCard(bottom = 6.dp) {
-                Text(
-                    text = stringResource(R.string.sync_connect_hint),
-                    modifier = Modifier.padding(16.dp),
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                )
                 ArrowPreference(
                     title = stringResource(R.string.sync_scan_qr),
+                    summary = stringResource(R.string.sync_scan_hint),
                     onClick = onScanQr,
                 )
-                TextField(
-                    value = peerHost,
-                    onValueChange = onPeerHost,
+                LabeledField(
                     label = stringResource(R.string.sync_peer_host),
-                    singleLine = true,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    value = peerHost,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    onChange = onPeerHost,
                 )
-                TextField(
-                    value = peerPort,
-                    onValueChange = onPeerPort,
+                LabeledField(
                     label = stringResource(R.string.sync_peer_port),
-                    singleLine = true,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    value = peerPort,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    onChange = onPeerPort,
                 )
-                TextField(
-                    value = peerToken,
-                    onValueChange = onPeerToken,
+                LabeledField(
                     label = stringResource(R.string.sync_peer_token),
-                    singleLine = true,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                )
-                ArrowPreference(
-                    title = stringResource(R.string.sync_save_peer),
-                    onClick = onSavePeer,
+                    value = peerToken,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    onChange = onPeerToken,
                 )
                 ArrowPreference(
                     title = stringResource(R.string.sync_probe),
                     onClick = onProbe,
+                )
+                ArrowPreference(
+                    title = stringResource(R.string.sync_save_peer),
+                    onClick = onSavePeer,
+                    enabled = canSavePeer,
                 )
             }
         }
@@ -169,6 +193,7 @@ fun ProjectSyncPage(
                 )
             }
         }
+        item { Spacer(Modifier.height(12.dp)) }
     }
 }
 
@@ -202,7 +227,10 @@ fun ProjectSyncDiffDialog(
         onDismissRequest = onDismiss,
     ) {
         val current = preview ?: return@OverlayDialog
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(
+            modifier = Modifier.heightIn(max = 500.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
             if (busy && applyTotal > 0) {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     SyncApplyProgressBar(fraction = applyFraction)
@@ -261,7 +289,7 @@ fun ProjectSyncDiffDialog(
             LazyColumn(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = 360.dp),
+                    .weight(1f, fill = false),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 itemsIndexed(current.items, key = { _, item -> item.id }) { index, item ->
@@ -443,8 +471,7 @@ private fun SyncThumb(file: File?, bytes: ByteArray?) {
     Box(
         modifier = Modifier
             .size(40.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .background(MiuixTheme.colorScheme.secondaryContainer),
+            .squircleSurface(MiuixTheme.colorScheme.secondaryContainer, 10.dp),
         contentAlignment = Alignment.Center,
     ) {
         if (bitmap != null) {
@@ -501,14 +528,15 @@ private fun actionLabel(action: ProjectSyncAction, item: ProjectSyncDiffItem): S
 
 @Composable
 private fun SyncCheckMark(checked: Boolean) {
+    val color = if (checked) {
+        MiuixTheme.colorScheme.primary
+    } else {
+        MiuixTheme.colorScheme.surfaceContainerHighest
+    }
     Box(
         modifier = Modifier
             .size(22.dp)
-            .clip(RoundedCornerShape(6.dp))
-            .background(
-                if (checked) MiuixTheme.colorScheme.primary
-                else MiuixTheme.colorScheme.surfaceContainerHighest,
-            ),
+            .squircleBackground(color, 6.dp),
         contentAlignment = Alignment.Center,
     ) {
         if (checked) {

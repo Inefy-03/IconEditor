@@ -19,8 +19,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import com.bocchi.iconeditor.R
 import com.bocchi.iconeditor.model.ExportFormat
@@ -34,6 +39,7 @@ import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import com.bocchi.iconeditor.ui.page.projectDisplayTitle
+import kotlinx.coroutines.delay
 
 @Composable
 fun EmptyState(
@@ -57,7 +63,13 @@ fun EmptyState(
 }
 
 @Composable
-fun ConfirmDeleteDialog(project: ProjectSummary?, metadata: ProjectMetadata?, onDismiss: () -> Unit, onConfirm: (ProjectSummary) -> Unit) {
+fun ConfirmDeleteDialog(
+    project: ProjectSummary?,
+    metadata: ProjectMetadata?,
+    onDismiss: () -> Unit,
+    onDelete: (ProjectSummary) -> Unit,
+    onMoveToTrash: (ProjectSummary) -> Unit,
+) {
     val displayName = if (project != null && metadata != null) {
         when (project.sourceType) {
             SourceType.Mtz -> metadata.mtz.title
@@ -74,9 +86,24 @@ fun ConfirmDeleteDialog(project: ProjectSummary?, metadata: ProjectMetadata?, on
         summary = stringResource(R.string.delete_project_summary, displayName),
         onDismissRequest = onDismiss,
     ) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Button(modifier = Modifier.weight(1f), onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
-            Button(modifier = Modifier.weight(1f), onClick = { project?.let(onConfirm) }) { Text(stringResource(R.string.action_confirm)) }
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Button(
+                    modifier = Modifier.weight(1f),
+                    onClick = { project?.let(onDelete) },
+                ) {
+                    Text(stringResource(R.string.action_delete))
+                }
+                Button(
+                    modifier = Modifier.weight(1f),
+                    onClick = { project?.let(onMoveToTrash) },
+                ) {
+                    Text(stringResource(R.string.action_move_to_trash))
+                }
+            }
+            Button(modifier = Modifier.fillMaxWidth(), onClick = onDismiss) {
+                Text(stringResource(R.string.action_cancel))
+            }
         }
     }
 }
@@ -88,32 +115,57 @@ fun RenameProjectDialog(
     onDismiss: () -> Unit,
     onConfirm: (ProjectSummary, String) -> Unit,
 ) {
-    var name by remember { mutableStateOf("") }
-    LaunchedEffect(project?.id, metadata) {
-        name = when {
+    var name by remember { mutableStateOf(TextFieldValue()) }
+    val focusRequester = remember { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
+    LaunchedEffect(project?.id) {
+        val initialName = when {
             project != null && metadata != null -> projectDisplayTitle(project, metadata)
             else -> project?.name.orEmpty()
+        }
+        name = TextFieldValue(
+            text = initialName,
+            selection = TextRange(initialName.length),
+        )
+        if (project != null) {
+            delay(200)
+            focusRequester.requestFocus()
+            keyboardController?.show()
         }
     }
     OverlayDialog(
         show = project != null,
         title = stringResource(R.string.rename_project_title),
-        onDismissRequest = onDismiss,
+        onDismissRequest = {
+            keyboardController?.hide()
+            onDismiss()
+        },
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             TextField(
                 value = name,
                 onValueChange = { name = it },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .focusRequester(focusRequester),
             )
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Button(modifier = Modifier.weight(1f), onClick = onDismiss) {
+                Button(
+                    modifier = Modifier.weight(1f),
+                    onClick = {
+                        keyboardController?.hide()
+                        onDismiss()
+                    },
+                ) {
                     Text(stringResource(R.string.action_cancel))
                 }
                 Button(
                     modifier = Modifier.weight(1f),
-                    onClick = { project?.let { onConfirm(it, name) } },
-                    enabled = name.trim().isNotEmpty(),
+                    onClick = {
+                        keyboardController?.hide()
+                        project?.let { onConfirm(it, name.text) }
+                    },
+                    enabled = name.text.trim().isNotEmpty(),
                 ) {
                     Text(stringResource(R.string.action_confirm))
                 }

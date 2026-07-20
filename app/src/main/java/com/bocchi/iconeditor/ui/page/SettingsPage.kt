@@ -14,6 +14,7 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -41,6 +42,7 @@ import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.preference.WindowSpinnerPreference
 import top.yukonga.miuix.kmp.utils.overScrollVertical
+import top.yukonga.miuix.kmp.utils.scrollEndHaptic
 
 @Composable
 fun SettingsPage(
@@ -76,6 +78,7 @@ fun SettingsPage(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
+            .scrollEndHaptic()
             .overScrollVertical(),
         contentPadding = contentPadding,
         overscrollEffect = null,
@@ -91,9 +94,13 @@ fun SettingsPage(
                 )
             }
         }
-        item { SmallTitle(stringResource(R.string.settings_other)) }
+        item { SmallTitle(stringResource(R.string.settings_file_handling)) }
         item {
             PreferenceCard(bottom = 6.dp) {
+                ArrowPreference(
+                    title = stringResource(R.string.screen_project_sync),
+                    onClick = onProjectSync,
+                )
                 ArrowPreference(
                     title = stringResource(R.string.export_directory_title),
                     summary = exportDirectoryLabel,
@@ -106,20 +113,21 @@ fun SettingsPage(
                     )
                 }
                 ArrowPreference(
-                    title = stringResource(R.string.screen_project_sync),
-                    onClick = onProjectSync,
-                )
-                ArrowPreference(
                     title = stringResource(R.string.screen_trash),
-                    summary = stringResource(R.string.trash_settings_summary),
                     onClick = onTrash,
                 )
+            }
+        }
+        item { SmallTitle(stringResource(R.string.settings_other)) }
+        item {
+            PreferenceCard(bottom = 6.dp) {
                 ArrowPreference(
                     title = stringResource(R.string.about_title),
                     onClick = onAbout,
                 )
             }
         }
+        item { Spacer(Modifier.height(12.dp)) }
     }
 }
 
@@ -152,6 +160,7 @@ fun ThemeSettingsPage(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
+            .scrollEndHaptic()
             .overScrollVertical(),
         contentPadding = contentPadding,
         overscrollEffect = null,
@@ -202,7 +211,7 @@ fun ThemeSettingsPage(
                 }
             }
         }
-        item { Spacer(Modifier.navigationBarsPadding()) }
+        item { Spacer(Modifier.height(12.dp).navigationBarsPadding()) }
     }
 }
 

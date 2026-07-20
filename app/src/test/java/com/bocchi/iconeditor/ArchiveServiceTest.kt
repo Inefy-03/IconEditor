@@ -1,6 +1,7 @@
 package com.bocchi.iconeditor
 
 import com.bocchi.iconeditor.data.ArchiveService
+import com.bocchi.iconeditor.data.ThemePackAssets
 import com.bocchi.iconeditor.model.ExportFormat
 import com.bocchi.iconeditor.model.ProjectMetadata
 import com.bocchi.iconeditor.model.SourceType
@@ -84,6 +85,53 @@ class ArchiveServiceTest {
     }
 
     @Test
+    fun excludesManagedMaskAndSpecialAssetsFromApplicationIcons() {
+        val work = Files.createTempDirectory("iconeditor-managed-assets").toFile()
+        val iconRoot = File(work, "icons/res/drawable-xxhdpi").apply { mkdirs() }
+        File(iconRoot, "com.example.app.svg").writeText("<svg />")
+        File(iconRoot, "iconback.svg").writeText("<svg />")
+        File(iconRoot, "icon_pattern.svg").writeText("<svg />")
+        File(iconRoot, "status_bar_toggle_wifi_off.svg").writeText("<svg />")
+
+        assertEquals(
+            listOf("com.example.app"),
+            ArchiveService.scanIconAssets(work).map { it.packageName },
+        )
+        assertEquals(
+            listOf("com.example.app"),
+            ArchiveService.scanIconAssetsLite(work).map { it.packageName },
+        )
+    }
+
+    @Test
+    fun switchesTransformMaskConfigWhenCustomMaskChanges() {
+        val work = Files.createTempDirectory("iconeditor-transform-mask").toFile()
+        ArchiveService.createDefaultWorkspace(work)
+        val transformConfig = File(work, ThemePackAssets.TRANSFORM_CONFIG_PATH)
+        val customMask = File(work, ThemePackAssets.MtzMaskLayer.Mask.relativePath)
+        transformConfig.writeText(
+            transformConfig.readText().replace(
+                "</IconTransform>",
+                "<UnknownNode source=\"imported\" />\n</IconTransform>",
+            ),
+        )
+
+        assertTrue(transformConfig.readText().contains("name=\"ConfigIconMask\""))
+        customMask.parentFile?.mkdirs()
+        customMask.writeBytes(byteArrayOf(1, 2, 3))
+
+        assertTrue(ArchiveService.syncIconMaskTransformConfig(work))
+        assertFalse(transformConfig.readText().contains("name=\"ConfigIconMask\""))
+        assertTrue(transformConfig.readText().contains("<PointsMapping>"))
+        assertTrue(transformConfig.readText().contains("UnknownNode source=\"imported\""))
+
+        customMask.delete()
+        assertTrue(ArchiveService.syncIconMaskTransformConfig(work))
+        assertTrue(transformConfig.readText().contains("name=\"ConfigIconMask\""))
+        assertTrue(transformConfig.readText().contains("UnknownNode source=\"imported\""))
+    }
+
+    @Test
     fun importsAndExportsMtzMetadataAndIcons() {
         val temp = Files.createTempDirectory("iconeditor-mtz").toFile()
         val source = File(temp, "theme.mtz")
@@ -132,7 +180,10 @@ class ArchiveServiceTest {
         assertTrue(description.contains("<![CDATA[17]]>"))
         assertEquals(2, description.windowed("<![CDATA[A]]>".length).count { it == "<![CDATA[A]]>" })
         assertEquals("must not be exported", exported.getValue("import-only.txt").decodeToString())
-        assertEquals("<transform_config />", exportedIcons.getValue("transform_config.xml").decodeToString())
+        assertTrue(
+            exportedIcons.getValue("transform_config.xml").decodeToString()
+                .contains("name=\"ConfigIconMask\""),
+        )
         assertEquals(ZipEntry.STORED, zipMethods(out.toByteArray()).getValue("icons"))
     }
 
@@ -202,11 +253,12 @@ class ArchiveServiceTest {
     }
 
     @Test
-    fun templateExportUsesSuppliedNestedIconsArchive() {
+    fun templateExportUsesWorkspaceTransformConfigAndKeepsSpecialAssets() {
         val temp = Files.createTempDirectory("iconeditor-icons-template").toFile()
         val work = File(temp, "work")
         ArchiveService.createDefaultWorkspace(work)
         File(work, "icons/res/drawable-xxhdpi/com.example.app.png").writeBytes(byteArrayOf(1, 2, 3))
+        File(work, ThemePackAssets.SpecialIcon.WifiOff.relativePath).writeBytes(byteArrayOf(4, 5, 6))
         val out = ByteArrayOutputStream()
 
         ArchiveService.exportArchive(
@@ -220,10 +272,17 @@ class ArchiveServiceTest {
 
         val outer = unzipEntries(out.toByteArray())
         val icons = unzipEntries(outer.getValue("icons"))
-        assertEquals("<xiaomi-template />", icons.getValue("transform_config.xml").decodeToString())
+        assertTrue(
+            icons.getValue("transform_config.xml").decodeToString()
+                .contains("name=\"ConfigIconMask\""),
+        )
         assertEquals(
             byteArrayOf(1, 2, 3).toList(),
             icons.getValue("res/drawable-xxhdpi/com.example.app.png").toList(),
+        )
+        assertEquals(
+            byteArrayOf(4, 5, 6).toList(),
+            icons.getValue("res/drawable-xxhdpi/status_bar_toggle_wifi_off.png").toList(),
         )
     }
 

@@ -42,6 +42,8 @@ enum class ProjectSortField { CreatedAt, UpdatedAt, Name }
 
 enum class InfoTab { Mtz, Module, Apk }
 
+enum class SpecialAssetsTab { Masks, SpecialIcons }
+
 enum class ImportPhase { Copying, Extracting, ParsingIcons, Finishing }
 
 enum class ExportPhase { Preparing, PackagingIcons, WritingArchive, Signing, Finishing }

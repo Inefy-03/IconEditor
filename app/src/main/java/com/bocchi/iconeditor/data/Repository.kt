@@ -174,6 +174,11 @@ class ProjectRepository(private val context: Context) {
         moveProjectToTrash(id)
     }
 
+    fun deleteProjectPermanently(id: String) {
+        projectDir(id).deleteRecursively()
+        saveIndex(loadProjects().filterNot { it.id == id })
+    }
+
     fun loadTrash(): List<TrashEntry> =
         readJson(trashIndexFile, TrashIndex()).entries.sortedByDescending { it.deletedAt }
 
@@ -389,11 +394,11 @@ class ProjectRepository(private val context: Context) {
     }
 
     fun setApkLauncherIcon(id: String, uri: Uri) {
-        writeApkPngAsset(id, ApkPackAssets.LAUNCHER_ICON_PATH, uri)
+        writePngAsset(id, ApkPackAssets.LAUNCHER_ICON_PATH, uri)
     }
 
     fun setApkMaskLayer(id: String, layer: ApkPackAssets.MaskLayer, uri: Uri) {
-        writeApkPngAsset(id, layer.relativePath, uri)
+        writePngAsset(id, layer.relativePath, uri)
         if (layer == ApkPackAssets.MaskLayer.Mask) {
             File(workDir(id), ApkPackAssets.LEGACY_MASK_PATH).delete()
         }
@@ -412,6 +417,25 @@ class ProjectRepository(private val context: Context) {
         markDirty(id)
     }
 
+    fun themeDrawableFile(id: String, asset: ThemePackAssets.DrawableAsset): File? =
+        File(workDir(id), asset.relativePath).takeIf { it.isFile }
+
+    fun setThemeDrawable(id: String, asset: ThemePackAssets.DrawableAsset, uri: Uri) {
+        require(asset.resourceName in ThemePackAssets.reservedDrawableNames)
+        writePngAsset(id, asset.relativePath, uri)
+        if (asset == ThemePackAssets.MtzMaskLayer.Mask) {
+            ArchiveService.syncIconMaskTransformConfig(workDir(id))
+        }
+    }
+
+    fun clearThemeDrawable(id: String, asset: ThemePackAssets.DrawableAsset) {
+        File(workDir(id), asset.relativePath).delete()
+        if (asset == ThemePackAssets.MtzMaskLayer.Mask) {
+            ArchiveService.syncIconMaskTransformConfig(workDir(id))
+        }
+        markDirty(id)
+    }
+
     private fun migrateLegacyMaskIfNeeded(id: String) {
         val legacy = File(workDir(id), ApkPackAssets.LEGACY_MASK_PATH)
         val target = File(workDir(id), ApkPackAssets.MaskLayer.Mask.relativePath)
@@ -421,7 +445,7 @@ class ProjectRepository(private val context: Context) {
         }
     }
 
-    private fun writeApkPngAsset(id: String, relativePath: String, uri: Uri) {
+    private fun writePngAsset(id: String, relativePath: String, uri: Uri) {
         val target = File(workDir(id), relativePath)
         target.parentFile?.mkdirs()
         val bitmap = context.contentResolver.openInputStream(uri)?.use(BitmapFactory::decodeStream)
@@ -677,6 +701,10 @@ class ProjectRepository(private val context: Context) {
             pm = context.packageManager,
         )
         saveIconMapping(projectId, synced)
+        copyImportedMaskAssets(
+            stagingWork = stagingWork,
+            targetWork = targetWork,
+        )
         markDirty(projectId)
         discardIconImportStaging(preview.stagingId)
     }
@@ -1150,5 +1178,33 @@ class ProjectRepository(private val context: Context) {
             "customize.sh",
             "post-fs-data.sh",
         )
+    }
+}
+
+internal fun copyImportedMaskAssets(stagingWork: File, targetWork: File) {
+    ApkPackAssets.MaskLayer.entries.forEach { layer ->
+        val source = File(stagingWork, layer.relativePath)
+        if (!source.isFile) return@forEach
+        val target = File(targetWork, layer.relativePath)
+        target.parentFile?.mkdirs()
+        source.copyTo(target, overwrite = true)
+        if (layer == ApkPackAssets.MaskLayer.Mask) {
+            File(targetWork, ApkPackAssets.LEGACY_MASK_PATH).delete()
+        }
+    }
+
+    var mtzMaskImported = false
+    ThemePackAssets.MtzMaskLayer.entries.forEach { layer ->
+        val source = File(stagingWork, layer.relativePath)
+        if (!source.isFile) return@forEach
+        val target = File(targetWork, layer.relativePath)
+        target.parentFile?.mkdirs()
+        source.copyTo(target, overwrite = true)
+        if (layer == ThemePackAssets.MtzMaskLayer.Mask) {
+            mtzMaskImported = true
+        }
+    }
+    if (mtzMaskImported) {
+        ArchiveService.syncIconMaskTransformConfig(targetWork)
     }
 }

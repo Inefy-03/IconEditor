@@ -25,8 +25,15 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.calculateEndPadding
 import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -47,6 +54,7 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation3.runtime.NavEntry
 import androidx.navigation3.runtime.rememberNavBackStack
@@ -57,6 +65,7 @@ import com.bocchi.iconeditor.model.IconImportMode
 import com.bocchi.iconeditor.model.IconPreferences
 import com.bocchi.iconeditor.model.InfoTab
 import com.bocchi.iconeditor.model.ProjectSummary
+import com.bocchi.iconeditor.model.SpecialAssetsTab
 import com.bocchi.iconeditor.model.ThemeMode
 import com.bocchi.iconeditor.state.AppViewModel
 import com.bocchi.iconeditor.ui.component.AppTopBar
@@ -73,6 +82,7 @@ import com.bocchi.iconeditor.ui.component.RootPagerContent
 import com.bocchi.iconeditor.ui.component.Screen
 import com.bocchi.iconeditor.ui.component.appPageBackground
 import com.bocchi.iconeditor.data.ApkPackAssets
+import com.bocchi.iconeditor.data.ThemePackAssets
 import com.bocchi.iconeditor.data.ExportDirectoryHelper
 import com.bocchi.iconeditor.data.ImportSourceDetector
 import com.bocchi.iconeditor.ui.component.rememberMiuixBlurBackdrop
@@ -88,10 +98,10 @@ import com.bocchi.iconeditor.ui.page.ProjectSyncPage
 import com.bocchi.iconeditor.ui.page.TrashPage
 import com.bocchi.iconeditor.ui.page.ProjectsPage
 import com.bocchi.iconeditor.ui.page.SettingsPage
+import com.bocchi.iconeditor.ui.page.SpecialAssetsPage
 import com.bocchi.iconeditor.ui.page.ThemeSettingsPage
 import kotlinx.coroutines.launch
 import com.bocchi.iconeditor.ui.component.displayName
-import top.yukonga.miuix.kmp.basic.FabPosition
 import com.bocchi.iconeditor.ui.component.ExportProgressOverlay
 import com.bocchi.iconeditor.ui.component.ImportProgressOverlay
 import top.yukonga.miuix.kmp.basic.FloatingActionButton
@@ -117,11 +127,10 @@ internal val ProjectImportMimeTypes = listOf(
 internal const val ProjectImportPrimaryMimeType = "application/zip"
 private const val InstalledAppsPermission = "com.android.permission.GET_INSTALLED_APPS"
 
-private enum class ApkAssetPickTarget {
-    LauncherIcon,
-    IconBack,
-    IconMask,
-    IconUpon,
+private sealed interface ImageAssetPickTarget {
+    data object LauncherIcon : ImageAssetPickTarget
+    data class ApkMask(val layer: ApkPackAssets.MaskLayer) : ImageAssetPickTarget
+    data class ThemeDrawable(val asset: ThemePackAssets.DrawableAsset) : ImageAssetPickTarget
 }
 
 private class OpenProjectDocument : ActivityResultContracts.OpenDocument() {
@@ -192,6 +201,7 @@ private fun IconEditorApp(
     var exportPickerProject by remember { mutableStateOf<ProjectSummary?>(null) }
     var incompleteExport by remember { mutableStateOf<Pair<ProjectSummary, ExportFormat>?>(null) }
     var infoTab by remember { mutableStateOf(InfoTab.Mtz) }
+    var specialAssetsTab by remember { mutableStateOf(SpecialAssetsTab.Masks) }
     var addIconRequest by remember { mutableIntStateOf(0) }
     var rootTabIndex by rememberSaveable { mutableStateOf(rootScreenIndex(Screen.Projects)) }
     val navBackStack = rememberNavBackStack(Screen.Projects)
@@ -205,6 +215,13 @@ private fun IconEditorApp(
     val coroutineScope = rememberCoroutineScope()
 
     val context = LocalContext.current
+    LaunchedEffect(viewModel.toastMessageText) {
+        val message = viewModel.toastMessageText
+        if (message != null) {
+            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+            viewModel.clearToastMessage()
+        }
+    }
     val installedAppsPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
@@ -290,7 +307,20 @@ private fun IconEditorApp(
         ),
     ) { uri ->
         val project = exportPickerProject
-        if (uri != null && project != null) viewModel.exportProject(project.id, ExportFormat.Mtz, uri)
+        if (uri != null && project != null) {
+            val fallbackName = "${viewModel.exportSuggestedName(project, ExportFormat.Mtz)}.mtz"
+            viewModel.exportProject(
+                id = project.id,
+                format = ExportFormat.Mtz,
+                target = uri,
+                locationLabel = ExportDirectoryHelper.describeExportLocation(
+                    context,
+                    viewModel.settings,
+                    uri,
+                    fallbackName,
+                ),
+            )
+        }
         exportPickerProject = null
     }
     val zipExportLauncher = rememberLauncherForActivityResult(
@@ -300,7 +330,20 @@ private fun IconEditorApp(
         ),
     ) { uri ->
         val project = exportPickerProject
-        if (uri != null && project != null) viewModel.exportProject(project.id, ExportFormat.ModuleZip, uri)
+        if (uri != null && project != null) {
+            val fallbackName = "${viewModel.exportSuggestedName(project, ExportFormat.ModuleZip)}.zip"
+            viewModel.exportProject(
+                id = project.id,
+                format = ExportFormat.ModuleZip,
+                target = uri,
+                locationLabel = ExportDirectoryHelper.describeExportLocation(
+                    context,
+                    viewModel.settings,
+                    uri,
+                    fallbackName,
+                ),
+            )
+        }
         exportPickerProject = null
     }
     val apkExportLauncher = rememberLauncherForActivityResult(
@@ -310,27 +353,39 @@ private fun IconEditorApp(
         ),
     ) { uri ->
         val project = exportPickerProject
-        if (uri != null && project != null) viewModel.exportProject(project.id, ExportFormat.Apk, uri)
+        if (uri != null && project != null) {
+            val fallbackName = "${viewModel.exportSuggestedName(project, ExportFormat.Apk)}.apk"
+            viewModel.exportProject(
+                id = project.id,
+                format = ExportFormat.Apk,
+                target = uri,
+                locationLabel = ExportDirectoryHelper.describeExportLocation(
+                    context,
+                    viewModel.settings,
+                    uri,
+                    fallbackName,
+                ),
+            )
+        }
         exportPickerProject = null
     }
-    var apkAssetPickTarget by remember { mutableStateOf<ApkAssetPickTarget?>(null) }
+    var imageAssetPickTarget by remember { mutableStateOf<ImageAssetPickTarget?>(null) }
     val apkAssetPickLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
     ) { uri ->
-        val target = apkAssetPickTarget
-        apkAssetPickTarget = null
+        val target = imageAssetPickTarget
+        imageAssetPickTarget = null
         if (uri != null && target != null) {
             when (target) {
-                ApkAssetPickTarget.LauncherIcon -> viewModel.setApkLauncherIcon(uri)
-                ApkAssetPickTarget.IconBack -> viewModel.setApkMaskLayer(ApkPackAssets.MaskLayer.Back, uri)
-                ApkAssetPickTarget.IconMask -> viewModel.setApkMaskLayer(ApkPackAssets.MaskLayer.Mask, uri)
-                ApkAssetPickTarget.IconUpon -> viewModel.setApkMaskLayer(ApkPackAssets.MaskLayer.Upon, uri)
+                ImageAssetPickTarget.LauncherIcon -> viewModel.setApkLauncherIcon(uri)
+                is ImageAssetPickTarget.ApkMask -> viewModel.setApkMaskLayer(target.layer, uri)
+                is ImageAssetPickTarget.ThemeDrawable -> viewModel.setThemeDrawable(target.asset, uri)
             }
         }
     }
     val scrollBehavior = MiuixScrollBehavior()
     LaunchedEffect(rootPagerState) {
-        snapshotFlow { rootPagerState.currentPage }.collect { page ->
+        snapshotFlow { rootPagerState.settledPage }.collect { page ->
             val safePage = page.coerceIn(rootScreens.indices)
             rootTabIndex = safePage
         }
@@ -378,7 +433,6 @@ private fun IconEditorApp(
                             val pageBackground = appPageBackground(viewModel.settings)
                             when (targetScreen) {
                                 Screen.Projects, Screen.Settings -> RootScene(
-                                    rootScreens = rootScreens,
                                     useNavigationRail = useNavigationRail,
                                     pageBackground = pageBackground,
                                     settings = viewModel.settings,
@@ -393,20 +447,14 @@ private fun IconEditorApp(
                                         importLauncher.launch(ProjectImportMimeTypes.toTypedArray())
                                     },
                                     onSelectRoot = ::selectRoot,
-                                    projectsPage = { contentPadding ->
+                                    projectsPage = { contentPadding, onImportFabVisibilityChanged ->
                                         ProjectsPage(
                                             projects = viewModel.projects,
                                             metadata = viewModel.projectMetadata,
                                             sortField = viewModel.settings.projectSortField,
                                             contentPadding = contentPadding.withPageMargins(),
                                             scrollToTopRequest = viewModel.projectsScrollToTopRequest,
-                                            syncServerRunning = viewModel.syncServerRunning,
-                                            syncLanAddress = viewModel.syncLanAddress,
-                                            syncServerPort = viewModel.syncServerPort,
-                                            onToggleSyncServer = { enabled ->
-                                                if (enabled) viewModel.startSyncServer()
-                                                else viewModel.stopSyncServer()
-                                            },
+                                            onImportFabVisibilityChanged = onImportFabVisibilityChanged,
                                             onEditInfo = {
                                                 infoTab = InfoTab.Mtz
                                                 viewModel.loadProject(it.id, loadIcons = false)
@@ -416,13 +464,6 @@ private fun IconEditorApp(
                                                 viewModel.loadProject(it.id, loadIcons = true)
                                                 navigateTo(Screen.Icons)
                                             },
-                                            onSync = {
-                                                if (!viewModel.hasSyncPeerConfigured()) {
-                                                    navigateTo(Screen.ProjectSync)
-                                                } else {
-                                                    viewModel.syncProject(it.id)
-                                                }
-                                            },
                                             onRename = { renameProject = it },
                                             onDelete = { deleteProject = it },
                                             onExport = { exportProject = it },
@@ -431,7 +472,10 @@ private fun IconEditorApp(
                                     settingsPage = { contentPadding ->
                                         SettingsPage(
                                             settings = viewModel.settings,
-                                            contentPadding = contentPadding.withPageMargins(horizontal = 0.dp),
+                                            contentPadding = contentPadding.withPageMargins(
+                                                horizontal = 0.dp,
+                                                vertical = 0.dp,
+                                            ),
                                             onSettings = viewModel::updateSettings,
                                             onTheme = { navigateTo(Screen.ThemeSettings) },
                                             onProjectSync = { navigateTo(Screen.ProjectSync) },
@@ -464,38 +508,11 @@ private fun IconEditorApp(
                                         onSaveModule = viewModel::saveModuleInfo,
                                         onSaveApk = viewModel::saveApkInfo,
                                         launcherIconFile = viewModel.apkLauncherIconFile(),
-                                        iconBackFile = viewModel.apkMaskLayerFile(ApkPackAssets.MaskLayer.Back),
-                                        iconMaskFile = viewModel.apkMaskLayerFile(ApkPackAssets.MaskLayer.Mask),
-                                        iconUponFile = viewModel.apkMaskLayerFile(ApkPackAssets.MaskLayer.Upon),
                                         onPickLauncherIcon = {
-                                            apkAssetPickTarget = ApkAssetPickTarget.LauncherIcon
+                                            imageAssetPickTarget = ImageAssetPickTarget.LauncherIcon
                                             apkAssetPickLauncher.launch(arrayOf("image/*"))
                                         },
                                         onClearLauncherIcon = viewModel::clearApkLauncherIcon,
-                                        onPickIconBack = {
-                                            apkAssetPickTarget = ApkAssetPickTarget.IconBack
-                                            apkAssetPickLauncher.launch(arrayOf("image/*"))
-                                        },
-                                        onClearIconBack = {
-                                            viewModel.clearApkMaskLayer(ApkPackAssets.MaskLayer.Back)
-                                        },
-                                        onPickIconMask = {
-                                            apkAssetPickTarget = ApkAssetPickTarget.IconMask
-                                            apkAssetPickLauncher.launch(arrayOf("image/*"))
-                                        },
-                                        onClearIconMask = {
-                                            viewModel.clearApkMaskLayer(ApkPackAssets.MaskLayer.Mask)
-                                        },
-                                        onPickIconUpon = {
-                                            apkAssetPickTarget = ApkAssetPickTarget.IconUpon
-                                            apkAssetPickLauncher.launch(arrayOf("image/*"))
-                                        },
-                                        onClearIconUpon = {
-                                            viewModel.clearApkMaskLayer(ApkPackAssets.MaskLayer.Upon)
-                                        },
-                                        onImportMaskFromPack = {
-                                            maskPackImportLauncher.launch(ProjectImportMimeTypes.toTypedArray())
-                                        },
                                     )
                                 }
                                 Screen.Icons -> SecondaryScene(
@@ -518,6 +535,10 @@ private fun IconEditorApp(
                                         loading = viewModel.isProjectLoading,
                                         addIconRequest = addIconRequest,
                                         iconFile = viewModel::iconFile,
+                                        onEditSpecialAssets = {
+                                            specialAssetsTab = SpecialAssetsTab.Masks
+                                            navigateTo(Screen.SpecialAssets)
+                                        },
                                         onConfirmEdits = {
                                                 isNew,
                                                 originalPackageName,
@@ -544,6 +565,39 @@ private fun IconEditorApp(
                                         onDeleteIcon = viewModel::deleteIcon,
                                     )
                                 }
+                                Screen.SpecialAssets -> SecondaryScene(
+                                    screen = Screen.SpecialAssets,
+                                    pageBackground = pageBackground,
+                                    scrollBehavior = scrollBehavior,
+                                    blurEnabled = viewModel.settings.blurEnabled,
+                                    iconPreferences = viewModel.iconPreferences,
+                                    onIconPreferences = ::onIconPreferencesChanged,
+                                    onBack = ::navigateBack,
+                                    onCreateProject = viewModel::createProject,
+                                    specialAssetsTab = specialAssetsTab,
+                                    onSpecialAssetsTab = { specialAssetsTab = it },
+                                ) { contentPadding ->
+                                    SpecialAssetsPage(
+                                        selectedTab = specialAssetsTab,
+                                        onSelectedTab = { specialAssetsTab = it },
+                                        contentPadding = contentPadding,
+                                        apkMaskFile = viewModel::apkMaskLayerFile,
+                                        themeDrawableFile = viewModel::themeDrawableFile,
+                                        onPickApkMask = { layer ->
+                                            imageAssetPickTarget = ImageAssetPickTarget.ApkMask(layer)
+                                            apkAssetPickLauncher.launch(arrayOf("image/*"))
+                                        },
+                                        onClearApkMask = viewModel::clearApkMaskLayer,
+                                        onImportMaskFromPack = {
+                                            maskPackImportLauncher.launch(ProjectImportMimeTypes.toTypedArray())
+                                        },
+                                        onPickThemeDrawable = { asset ->
+                                            imageAssetPickTarget = ImageAssetPickTarget.ThemeDrawable(asset)
+                                            apkAssetPickLauncher.launch(arrayOf("image/*"))
+                                        },
+                                        onClearThemeDrawable = viewModel::clearThemeDrawable,
+                                    )
+                                }
                                 Screen.ThemeSettings -> SecondaryScene(
                                     screen = Screen.ThemeSettings,
                                     pageBackground = pageBackground,
@@ -556,7 +610,10 @@ private fun IconEditorApp(
                                 ) { contentPadding ->
                                     ThemeSettingsPage(
                                         settings = viewModel.settings,
-                                        contentPadding = contentPadding.withPageMargins(horizontal = 0.dp),
+                                        contentPadding = contentPadding.withPageMargins(
+                                            horizontal = 0.dp,
+                                            vertical = 0.dp,
+                                        ),
                                         onSettings = viewModel::updateSettings,
                                     )
                                 }
@@ -572,7 +629,10 @@ private fun IconEditorApp(
                                     onCreateProject = viewModel::createProject,
                                 ) { contentPadding ->
                                     ProjectSyncPage(
-                                        contentPadding = contentPadding.withPageMargins(horizontal = 0.dp),
+                                        contentPadding = contentPadding.withPageMargins(
+                                            horizontal = 0.dp,
+                                            vertical = 0.dp,
+                                        ),
                                         serverRunning = viewModel.syncServerRunning,
                                         serverPort = viewModel.syncServerPort,
                                         serverToken = viewModel.syncServerToken,
@@ -621,8 +681,12 @@ private fun IconEditorApp(
                     project = deleteProject,
                     metadata = deleteProject?.let { viewModel.projectMetadata[it.id] },
                     onDismiss = { deleteProject = null },
-                    onConfirm = {
-                        viewModel.deleteProject(it.id)
+                    onDelete = {
+                        viewModel.deleteProjectPermanently(it.id)
+                        deleteProject = null
+                    },
+                    onMoveToTrash = {
+                        viewModel.moveProjectToTrash(it.id)
                         deleteProject = null
                     },
                 )
@@ -762,7 +826,11 @@ private fun IconEditorApp(
                         }
                     },
                     onOpenDirectory = {
-                        val opened = ExportDirectoryHelper.openExportDirectory(context, viewModel.settings)
+                        val opened = ExportDirectoryHelper.openExportDirectory(
+                            context = context,
+                            settings = viewModel.settings,
+                            exportedUri = viewModel.lastExportUri,
+                        )
                         if (!opened) {
                             Toast.makeText(
                                 context,
@@ -832,7 +900,6 @@ private fun Intent.projectUri(): Uri? = when (action) {
 
 @Composable
 private fun RootScene(
-    rootScreens: List<Screen>,
     useNavigationRail: Boolean,
     pageBackground: Color,
     settings: AppSettings,
@@ -845,12 +912,26 @@ private fun RootScene(
     onCreateProject: () -> Unit,
     onImportProject: () -> Unit,
     onSelectRoot: (Screen) -> Unit,
-    projectsPage: @Composable (PaddingValues) -> Unit,
+    projectsPage: @Composable (PaddingValues, (Boolean) -> Unit) -> Unit,
     settingsPage: @Composable (PaddingValues) -> Unit,
 ) {
     val hasBottomBar = !useNavigationRail
-    val targetRootScreen = rootScreens[pagerState.targetPage.coerceIn(rootScreens.indices)]
+    val selectedRootScreen = if (pagerState.currentPage == rootScreenIndex(Screen.Settings)) {
+        Screen.Settings
+    } else {
+        Screen.Projects
+    }
     var rootPagerWidthPx by remember { mutableIntStateOf(0) }
+    var importFabVisible by remember { mutableStateOf(true) }
+    val importFabOffset by animateDpAsState(
+        targetValue = if (importFabVisible) {
+            0.dp
+        } else {
+            180.dp + WindowInsets.systemBars.asPaddingValues().calculateBottomPadding()
+        },
+        animationSpec = tween(durationMillis = 350),
+        label = "project-import-fab-offset",
+    )
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -865,22 +946,6 @@ private fun RootScene(
                 )
             }
         },
-        floatingActionButton = {
-            FloatingActionButton(
-                modifier = Modifier.graphicsLayer {
-                    val projectPageOffset = pagerState.currentPage + pagerState.currentPageOffsetFraction
-                    translationX = -projectPageOffset * rootPagerWidthPx
-                },
-                onClick = onImportProject,
-            ) {
-                Icon(
-                    imageVector = MiuixIcons.Demibold.Add,
-                    tint = Color.White,
-                    contentDescription = stringResource(R.string.action_import_project),
-                )
-            }
-        },
-        floatingActionButtonPosition = FabPosition.End,
         containerColor = pageBackground,
     ) { padding ->
         val bottomContentPadding = padding.calculateBottomPadding()
@@ -892,7 +957,7 @@ private fun RootScene(
             Row(Modifier.fillMaxSize()) {
                 if (useNavigationRail) {
                     MainNavigationRail(
-                        selected = targetRootScreen,
+                        selected = selectedRootScreen,
                         settings = settings,
                         backdrop = miuixBackdrop,
                         onSelect = onSelectRoot,
@@ -926,7 +991,11 @@ private fun RootScene(
                                 onSettings = onSettings,
                                 onCreateProject = onCreateProject,
                                 bottomContentPadding = bottomContentPadding,
-                                content = projectsPage,
+                                content = { contentPadding ->
+                                    projectsPage(contentPadding) { visible ->
+                                        importFabVisible = visible
+                                    }
+                                },
                             )
                         },
                         settingsPage = {
@@ -942,6 +1011,27 @@ private fun RootScene(
                                 content = settingsPage,
                             )
                         },
+                    )
+                }
+            }
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 12.dp, bottom = bottomContentPadding + 12.dp),
+            ) {
+                FloatingActionButton(
+                    modifier = Modifier
+                        .offset { IntOffset(x = 0, y = importFabOffset.roundToPx()) }
+                        .graphicsLayer {
+                            val projectPageOffset = pagerState.currentPage + pagerState.currentPageOffsetFraction
+                            translationX = -projectPageOffset * rootPagerWidthPx
+                        },
+                    onClick = onImportProject,
+                ) {
+                    Icon(
+                        imageVector = MiuixIcons.Demibold.Add,
+                        tint = Color.White,
+                        contentDescription = stringResource(R.string.action_import_project),
                     )
                 }
             }
@@ -995,7 +1085,7 @@ private fun RootTopBarPage(
                 .background(pageBackground)
                 .nestedScroll(scrollBehavior.nestedScrollConnection),
         ) {
-            content(contentPadding)
+                                content(contentPadding)
         }
     }
 }
@@ -1012,6 +1102,8 @@ private fun SecondaryScene(
     onCreateProject: () -> Unit,
     infoTab: InfoTab = InfoTab.Mtz,
     onInfoTab: (InfoTab) -> Unit = {},
+    specialAssetsTab: SpecialAssetsTab = SpecialAssetsTab.Masks,
+    onSpecialAssetsTab: (SpecialAssetsTab) -> Unit = {},
     onImportIcons: () -> Unit = {},
     onAddIcon: () -> Unit = {},
     content: @Composable (PaddingValues) -> Unit,
@@ -1031,6 +1123,8 @@ private fun SecondaryScene(
                 onIconPreferences = onIconPreferences,
                 infoTab = infoTab,
                 onInfoTab = onInfoTab,
+                specialAssetsTab = specialAssetsTab,
+                onSpecialAssetsTab = onSpecialAssetsTab,
                 onImportIcons = onImportIcons,
                 onAddIcon = onAddIcon,
             )

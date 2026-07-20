@@ -2,6 +2,7 @@ package com.bocchi.iconeditor.data.sync
 
 import com.bocchi.iconeditor.data.ApkPackAssets
 import com.bocchi.iconeditor.data.ArchiveService
+import com.bocchi.iconeditor.data.ThemePackAssets
 import com.bocchi.iconeditor.model.ProjectSummary
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
@@ -142,12 +143,7 @@ object ProjectSyncPackager {
             val src = File(projectDir, name)
             if (src.isFile) entries += name to src.readBytes()
         }
-        for (relative in listOf(
-            ApkPackAssets.LAUNCHER_ICON_PATH,
-            ApkPackAssets.MaskLayer.Back.relativePath,
-            ApkPackAssets.MaskLayer.Mask.relativePath,
-            ApkPackAssets.MaskLayer.Upon.relativePath,
-        )) {
+        for (relative in ManagedMetaAssetPaths) {
             val src = File(workDir, relative)
             if (src.isFile) entries += relative to src.readBytes()
         }
@@ -173,6 +169,10 @@ object ProjectSyncPackager {
                 staging.deleteRecursively()
             }
         }
+        val incomingNames = entries.mapTo(mutableSetOf()) { it.first }
+        ManagedMetaAssetPaths
+            .filterNot(incomingNames::contains)
+            .forEach { relative -> File(workDir, relative).delete() }
         for ((name, bytes) in entries) {
             when (name) {
                 "metadata.json", "preferences.json", "icon_mapping.json" ->
@@ -184,6 +184,7 @@ object ProjectSyncPackager {
                 }
             }
         }
+        ArchiveService.syncIconMaskTransformConfig(workDir)
     }
 
     fun readInventoryFromZip(zip: File): ProjectSyncInventory {
@@ -226,4 +227,11 @@ object ProjectSyncPackager {
             }
         }
     }
+
+    private val ManagedMetaAssetPaths = listOf(
+        ApkPackAssets.LAUNCHER_ICON_PATH,
+        ApkPackAssets.MaskLayer.Back.relativePath,
+        ApkPackAssets.MaskLayer.Mask.relativePath,
+        ApkPackAssets.MaskLayer.Upon.relativePath,
+    ) + ThemePackAssets.syncRelativePaths
 }

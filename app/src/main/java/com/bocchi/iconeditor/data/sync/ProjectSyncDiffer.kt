@@ -2,6 +2,7 @@ package com.bocchi.iconeditor.data.sync
 
 import com.bocchi.iconeditor.data.ApkPackAssets
 import com.bocchi.iconeditor.data.ArchiveService
+import com.bocchi.iconeditor.data.ThemePackAssets
 import com.bocchi.iconeditor.model.IconAsset
 import com.bocchi.iconeditor.model.ProjectMetadata
 import com.bocchi.iconeditor.model.ProjectSummary
@@ -36,6 +37,11 @@ object ProjectSyncInventoryBuilder {
             iconback = fileFingerprint(File(workDir, ApkPackAssets.MaskLayer.Back.relativePath)),
             iconmask = fileFingerprint(File(workDir, ApkPackAssets.MaskLayer.Mask.relativePath)),
             iconupon = fileFingerprint(File(workDir, ApkPackAssets.MaskLayer.Upon.relativePath)),
+            themeAssets = sha256Hex(
+                ThemePackAssets.syncRelativePaths.joinToString("\n") { path ->
+                    "$path:${fileFingerprint(File(workDir, path))}"
+                }.toByteArray(Charsets.UTF_8),
+            ),
         )
         // 只比语义化项目信息；preferences / mapping 会随本地操作变化，容易误报。
         return ProjectSyncInventory(
@@ -144,15 +150,15 @@ object ProjectSyncDiffer {
         val assetDiff = local.assets != remote.assets
         if (metaDiff || assetDiff) {
             val detail = when {
-                metaDiff && assetDiff -> "项目信息与遮罩/启动器不同"
+                metaDiff && assetDiff -> "项目信息与特殊素材不同"
                 metaDiff -> "项目信息不同"
-                else -> "遮罩或启动器图标不同"
+                else -> "特殊素材不同"
             }
             items += ProjectSyncDiffItem(
                 id = "metadata",
                 kind = ProjectSyncKind.metadataChanged,
                 packageName = "",
-                appName = "项目信息 / 遮罩 / 启动器图标",
+                appName = "项目信息 / 特殊素材",
                 detail = detail,
                 selected = false,
                 action = ProjectSyncAction.pullToLocal,

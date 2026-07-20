@@ -1,7 +1,6 @@
 package com.bocchi.iconeditor.ui.page
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -17,22 +16,32 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.unit.Velocity
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -52,15 +61,14 @@ import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Delete
 import top.yukonga.miuix.kmp.icon.extended.Download
 import top.yukonga.miuix.kmp.icon.extended.Edit
-import top.yukonga.miuix.kmp.icon.extended.Forward
 import top.yukonga.miuix.kmp.icon.extended.FolderFill
 import top.yukonga.miuix.kmp.icon.extended.GridView
 import top.yukonga.miuix.kmp.icon.extended.Info
 import top.yukonga.miuix.kmp.icon.extended.Remove
-import top.yukonga.miuix.kmp.icon.extended.Replace
-import top.yukonga.miuix.kmp.preference.SwitchPreference
+import top.yukonga.miuix.kmp.icon.extended.Rename
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
+import top.yukonga.miuix.kmp.utils.scrollEndHaptic
 
 @Composable
 fun ProjectsPage(
@@ -69,23 +77,78 @@ fun ProjectsPage(
     sortField: ProjectSortField = ProjectSortField.CreatedAt,
     contentPadding: PaddingValues = PaddingValues(12.dp),
     scrollToTopRequest: Int = 0,
-    syncServerRunning: Boolean = false,
-    syncLanAddress: String? = null,
-    syncServerPort: Int = 0,
-    onToggleSyncServer: (Boolean) -> Unit = {},
+    onImportFabVisibilityChanged: (Boolean) -> Unit = {},
     onEditInfo: (ProjectSummary) -> Unit,
     onEditIcons: (ProjectSummary) -> Unit,
-    onSync: (ProjectSummary) -> Unit,
     onRename: (ProjectSummary) -> Unit,
     onDelete: (ProjectSummary) -> Unit,
     onExport: (ProjectSummary) -> Unit,
 ) {
     val gridState = key(sortField) { rememberLazyGridState() }
+    val density = LocalDensity.current
+    val flingThreshold = with(density) { 1_000.dp.toPx() }
+    val latestFabVisibilityChanged by rememberUpdatedState(onImportFabVisibilityChanged)
+    var scrollDistance by remember { mutableFloatStateOf(0f) }
+    var reportedFabVisible by remember { mutableStateOf(true) }
+    fun updateFabVisibility(visible: Boolean) {
+        if (reportedFabVisible == visible) return
+        reportedFabVisible = visible
+        latestFabVisibilityChanged(visible)
+    }
+    val fabScrollConnection = remember(gridState, flingThreshold) {
+        object : NestedScrollConnection {
+            private fun isScrolledToEnd(): Boolean {
+                val layoutInfo = gridState.layoutInfo
+                val lastItem = layoutInfo.visibleItemsInfo.lastOrNull() ?: return true
+                return lastItem.index == layoutInfo.totalItemsCount - 1 &&
+                    lastItem.offset.y + lastItem.size.height <= layoutInfo.viewportEndOffset
+            }
+
+            override fun onPreScroll(available: Offset, source: androidx.compose.ui.input.nestedscroll.NestedScrollSource): Offset {
+                if (!isScrolledToEnd()) {
+                    scrollDistance += available.y
+                    when {
+                        scrollDistance < -50f -> {
+                            updateFabVisibility(false)
+                            scrollDistance = 0f
+                        }
+                        scrollDistance > 50f -> {
+                            updateFabVisibility(true)
+                            scrollDistance = 0f
+                        }
+                    }
+                }
+                return Offset.Zero
+            }
+
+            override suspend fun onPreFling(available: Velocity): Velocity {
+                if (!isScrolledToEnd() && kotlin.math.abs(available.y) >= flingThreshold) {
+                    updateFabVisibility(available.y > 0f)
+                    scrollDistance = 0f
+                }
+                return Velocity.Zero
+            }
+        }
+    }
     val sortedProjects = remember(projects, metadata, sortField) {
         sortProjects(projects, metadata, sortField)
     }
+    LaunchedEffect(gridState) {
+        scrollDistance = 0f
+        updateFabVisibility(true)
+    }
+    LaunchedEffect(projects.isEmpty()) {
+        if (projects.isEmpty()) {
+            scrollDistance = 0f
+            updateFabVisibility(true)
+        }
+    }
     LaunchedEffect(scrollToTopRequest) {
-        if (scrollToTopRequest > 0 && projects.isNotEmpty()) gridState.scrollToItem(0)
+        if (scrollToTopRequest > 0 && projects.isNotEmpty()) {
+            gridState.scrollToItem(0)
+            scrollDistance = 0f
+            updateFabVisibility(true)
+        }
     }
     if (projects.isEmpty()) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -95,19 +158,12 @@ fun ProjectsPage(
             LazyColumn(
                 modifier = Modifier
                     .fillMaxSize()
+                    .scrollEndHaptic()
                     .overScrollVertical(),
                 contentPadding = contentPadding,
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 overscrollEffect = null,
             ) {
-                item {
-                    SyncServerToggleCard(
-                        running = syncServerRunning,
-                        lanAddress = syncLanAddress,
-                        port = syncServerPort,
-                        onToggle = onToggleSyncServer,
-                    )
-                }
                 item {
                     EmptyState(
                         text = stringResource(R.string.empty_projects),
@@ -123,7 +179,9 @@ fun ProjectsPage(
         LazyVerticalGrid(
             modifier = Modifier
                 .fillMaxSize()
-                .overScrollVertical(),
+                .scrollEndHaptic()
+                .overScrollVertical()
+                .nestedScroll(fabScrollConnection),
             state = gridState,
             columns = GridCells.Adaptive(350.dp),
             contentPadding = contentPadding,
@@ -131,55 +189,18 @@ fun ProjectsPage(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             overscrollEffect = null,
         ) {
-            item(span = { GridItemSpan(maxLineSpan) }, key = "sync-server-toggle") {
-                SyncServerToggleCard(
-                    running = syncServerRunning,
-                    lanAddress = syncLanAddress,
-                    port = syncServerPort,
-                    onToggle = onToggleSyncServer,
-                )
-            }
             gridItems(sortedProjects, key = { it.id }) { project ->
                 ProjectCard(
                     project,
                     metadata[project.id] ?: ProjectMetadata(),
                     onEditInfo,
                     onEditIcons,
-                    onSync,
                     onRename,
                     onDelete,
                     onExport,
                 )
             }
         }
-    }
-}
-
-@Composable
-private fun SyncServerToggleCard(
-    running: Boolean,
-    lanAddress: String?,
-    port: Int,
-    onToggle: (Boolean) -> Unit,
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        insideMargin = PaddingValues(0.dp),
-    ) {
-        SwitchPreference(
-            title = stringResource(R.string.sync_server_toggle),
-            summary = if (running) {
-                stringResource(
-                    R.string.sync_server_running,
-                    lanAddress ?: "0.0.0.0",
-                    port,
-                )
-            } else {
-                stringResource(R.string.sync_server_toggle_off)
-            },
-            checked = running,
-            onCheckedChange = onToggle,
-        )
     }
 }
 
@@ -206,7 +227,6 @@ fun ProjectCard(
     metadata: ProjectMetadata,
     onEditInfo: (ProjectSummary) -> Unit,
     onEditIcons: (ProjectSummary) -> Unit,
-    onSync: (ProjectSummary) -> Unit,
     onRename: (ProjectSummary) -> Unit,
     onDelete: (ProjectSummary) -> Unit,
     onExport: (ProjectSummary) -> Unit,
@@ -229,9 +249,7 @@ fun ProjectCard(
             ) {
                 Text(
                     text = displayTitle,
-                    modifier = Modifier
-                        .weight(1f)
-                        .clickable { onRename(project) },
+                    modifier = Modifier.weight(1f),
                     style = MiuixTheme.textStyles.title4,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
@@ -279,7 +297,7 @@ fun ProjectCard(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             ProjectActionButton(
-                imageVector = MiuixIcons.Replace,
+                imageVector = MiuixIcons.Rename,
                 contentDescription = stringResource(R.string.action_rename),
                 onClick = { onRename(project) },
             )
@@ -292,11 +310,6 @@ fun ProjectCard(
                 imageVector = MiuixIcons.GridView,
                 contentDescription = stringResource(R.string.action_edit_icons),
                 onClick = { onEditIcons(project) },
-            )
-            ProjectActionButton(
-                imageVector = MiuixIcons.Forward,
-                contentDescription = stringResource(R.string.action_sync),
-                onClick = { onSync(project) },
             )
             Spacer(Modifier.weight(1f))
             ProjectActionButton(
@@ -322,17 +335,18 @@ fun ProjectBadge(
 ) {
     Box(
         modifier = Modifier
-            .defaultMinSize(minHeight = 24.dp)
-            .clip(RoundedCornerShape(6.dp))
+            .defaultMinSize(minHeight = 18.dp)
+            .clip(RoundedCornerShape(3.dp))
             .background(containerColor)
-            .padding(horizontal = 8.dp),
+            .padding(horizontal = 6.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             text = text,
             color = textColor,
-            fontSize = 12.sp,
-            fontWeight = FontWeight(750),
+            fontSize = 9.sp,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Bold,
             maxLines = 1,
             softWrap = false,
         )
