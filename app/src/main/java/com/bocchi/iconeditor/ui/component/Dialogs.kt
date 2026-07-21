@@ -180,7 +180,7 @@ fun ExportDialog(
     validate: (String, ExportFormat) -> List<String>,
     onDismiss: () -> Unit,
     onExport: (ProjectSummary, ExportFormat) -> Unit,
-    onValidationFailed: (ProjectSummary, ExportFormat) -> Unit,
+    onValidationFailed: (ProjectSummary, ExportFormat, List<String>) -> Unit,
 ) {
     // Local visibility so choosing a format dismisses immediately and cannot be cancelled
     // mid-animation if parent state briefly flickers.
@@ -210,7 +210,7 @@ fun ExportDialog(
                 onDismiss()
                 val errors = validate(p.id, ExportFormat.Mtz)
                 if (errors.isEmpty()) onExport(p, ExportFormat.Mtz)
-                else onValidationFailed(p, ExportFormat.Mtz)
+                else onValidationFailed(p, ExportFormat.Mtz, errors)
             }, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.export_mtz)) }
             Button(onClick = {
                 if (p == null) return@Button
@@ -218,7 +218,7 @@ fun ExportDialog(
                 onDismiss()
                 val errors = validate(p.id, ExportFormat.ModuleZip)
                 if (errors.isEmpty()) onExport(p, ExportFormat.ModuleZip)
-                else onValidationFailed(p, ExportFormat.ModuleZip)
+                else onValidationFailed(p, ExportFormat.ModuleZip, errors)
             }, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.export_module_zip)) }
             Button(onClick = {
                 if (p == null) return@Button
@@ -226,7 +226,7 @@ fun ExportDialog(
                 onDismiss()
                 val errors = validate(p.id, ExportFormat.Apk)
                 if (errors.isEmpty()) onExport(p, ExportFormat.Apk)
-                else onValidationFailed(p, ExportFormat.Apk)
+                else onValidationFailed(p, ExportFormat.Apk, errors)
             }, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.export_apk)) }
             Button(modifier = Modifier.fillMaxWidth(), onClick = {
                 visible = false
@@ -238,24 +238,19 @@ fun ExportDialog(
 
 @Composable
 fun ExportValidationDialog(
-    format: ExportFormat?,
+    errors: List<String>?,
     onDismiss: () -> Unit,
     onComplete: () -> Unit,
 ) {
     OverlayDialog(
-        show = format != null,
+        show = errors != null,
         title = stringResource(R.string.export_failed_title),
-        summary = when (format) {
-            ExportFormat.Mtz -> stringResource(R.string.export_mtz_incomplete)
-            ExportFormat.ModuleZip -> stringResource(R.string.export_module_incomplete)
-            ExportFormat.Apk -> stringResource(R.string.export_apk_incomplete)
-            null -> null
-        },
+        summary = errors?.joinToString(separator = "\n"),
         onDismissRequest = onDismiss,
     ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Button(modifier = Modifier.weight(1f), onClick = onComplete) {
-                Text(stringResource(R.string.action_complete_info))
+                Text(stringResource(R.string.action_edit_info))
             }
             Button(modifier = Modifier.weight(1f), onClick = onDismiss) {
                 Text(stringResource(R.string.action_confirm))
