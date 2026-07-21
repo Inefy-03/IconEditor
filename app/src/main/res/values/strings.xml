@@ -5,7 +5,7 @@
     <string name="screen_settings">设置</string>
     <string name="screen_info_edit">信息编辑</string>
     <string name="screen_icon_edit">图标编辑</string>
-    <string name="screen_special_assets">编辑特殊素材</string>
+    <string name="screen_special_assets">更多编辑</string>
     <string name="screen_theme_settings">主题设置</string>
     <string name="about_title">关于</string>
     <string name="about_blend_version">Version %1$s (%2$d)</string>
@@ -87,11 +87,6 @@
     <string name="export_complete_path">导出完成\n保存至：%1$s</string>
     <string name="export_failed_title">导出失败</string>
     <string name="export_failed_generic">导出失败，请重试</string>
-    <string name="export_mtz_incomplete">MTZ信息不全</string>
-    <string name="export_module_incomplete">Module信息不全</string>
-    <string name="export_apk_incomplete">APK信息不全</string>
-    <string name="action_complete_info">前往补全</string>
-
     <string name="source_universal">通用</string>
     <string name="source_theme">主题</string>
     <string name="source_module">模块</string>
@@ -100,7 +95,7 @@
     <string name="tab_module_info">Module</string>
     <string name="tab_apk_info">APK</string>
     <string name="tab_icon_masks">图标遮罩</string>
-    <string name="tab_special_icons">特殊图标</string>
+    <string name="tab_special_icons">快捷方式</string>
     <string name="module_install_messages">Module installation messages</string>
     <string name="apk_launcher_icon">APK应用图标</string>
     <string name="apk_launcher_icon_hint">用于图标包安装后的桌面图标</string>

@@ -127,6 +127,14 @@ fun ExportProgressOverlay(
             ) {
                 Text(stringResource(R.string.export_view_logs))
             }
+            if (progress.success && onOpenDirectory != null) {
+                Button(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = onOpenDirectory,
+                ) {
+                    Text(stringResource(R.string.export_open_directory))
+                }
+            }
             if (canInstall) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -144,14 +152,6 @@ fun ExportProgressOverlay(
                     ) {
                         Text(stringResource(R.string.export_apk_install_yes))
                     }
-                }
-            }
-            if (progress.success && onOpenDirectory != null) {
-                Button(
-                    modifier = Modifier.fillMaxWidth(),
-                    onClick = onOpenDirectory,
-                ) {
-                    Text(stringResource(R.string.export_open_directory))
                 }
             }
             if (!canInstall) {

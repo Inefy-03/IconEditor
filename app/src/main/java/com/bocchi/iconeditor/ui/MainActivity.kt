@@ -199,7 +199,9 @@ private fun IconEditorApp(
     var renameProject by remember { mutableStateOf<ProjectSummary?>(null) }
     var exportProject by remember { mutableStateOf<ProjectSummary?>(null) }
     var exportPickerProject by remember { mutableStateOf<ProjectSummary?>(null) }
-    var incompleteExport by remember { mutableStateOf<Pair<ProjectSummary, ExportFormat>?>(null) }
+    var invalidExport by remember {
+        mutableStateOf<Triple<ProjectSummary, ExportFormat, List<String>>?>(null)
+    }
     var infoTab by remember { mutableStateOf(InfoTab.Mtz) }
     var specialAssetsTab by remember { mutableStateOf(SpecialAssetsTab.Masks) }
     var addIconRequest by remember { mutableIntStateOf(0) }
@@ -738,17 +740,17 @@ private fun IconEditorApp(
                             }
                         }
                     },
-                    onValidationFailed = { project, format ->
+                    onValidationFailed = { project, format, errors ->
                         exportProject = null
-                        incompleteExport = project to format
+                        invalidExport = Triple(project, format, errors)
                     },
                 )
                 ExportValidationDialog(
-                    format = incompleteExport?.second,
-                    onDismiss = { incompleteExport = null },
+                    errors = invalidExport?.third,
+                    onDismiss = { invalidExport = null },
                     onComplete = {
-                        val (project, format) = incompleteExport ?: return@ExportValidationDialog
-                        incompleteExport = null
+                        val (project, format) = invalidExport ?: return@ExportValidationDialog
+                        invalidExport = null
                         infoTab = when (format) {
                             ExportFormat.Mtz -> InfoTab.Mtz
                             ExportFormat.ModuleZip -> InfoTab.Module

@@ -946,15 +946,16 @@ class ProjectRepository(private val context: Context) {
                 if (metadata.mtz.title.isBlank()) add(context.getString(R.string.validation_mtz_title))
             }
             ExportFormat.ModuleZip -> buildList {
-                if (metadata.module.id.isBlank()) add(context.getString(R.string.validation_module_id))
+                if (metadata.module.id.isBlank()) {
+                    add(context.getString(R.string.validation_module_id))
+                } else if (!metadata.module.id.matches(Regex("^[a-zA-Z][a-zA-Z0-9._-]+$"))) {
+                    add(context.getString(R.string.validation_module_id_format))
+                }
                 if (metadata.module.name.isBlank()) add(context.getString(R.string.validation_module_name))
                 if (metadata.module.author.isBlank()) add(context.getString(R.string.validation_module_author))
                 if (metadata.module.version.isBlank()) add(context.getString(R.string.validation_module_version))
                 if (metadata.module.theme.isBlank()) add(context.getString(R.string.validation_module_theme))
                 if (metadata.module.themeId.isBlank()) add(context.getString(R.string.validation_module_theme_id))
-                if (!metadata.module.id.matches(Regex("^[a-zA-Z][a-zA-Z0-9._-]+$"))) {
-                    add(context.getString(R.string.validation_module_id_format))
-                }
             }
             ExportFormat.Apk -> buildList {
                 if (metadata.apk.packageName.isBlank()) {

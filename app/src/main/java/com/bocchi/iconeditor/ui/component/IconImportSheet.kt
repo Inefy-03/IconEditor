@@ -17,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.bocchi.iconeditor.R
@@ -94,6 +95,7 @@ fun IconImportConfirmDialog(
         ) {
             if (current != null) {
                 Text(
+                    modifier = Modifier.fillMaxWidth(),
                     text = stringResource(
                         R.string.icon_import_summary,
                         current.totalIncoming,
@@ -103,6 +105,7 @@ fun IconImportConfirmDialog(
                     ),
                     style = MiuixTheme.textStyles.subtitle,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    textAlign = TextAlign.Center,
                 )
                 LazyColumn(
                     modifier = Modifier
