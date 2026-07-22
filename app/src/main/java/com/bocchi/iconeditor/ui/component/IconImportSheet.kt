@@ -131,14 +131,14 @@ fun IconImportConfirmDialog(
                     onClick = onOverwrite,
                     enabled = (preview?.selectedCount ?: 0) > 0,
                 ) {
-                    Text(stringResource(R.string.icon_import_overwrite))
+                    ButtonLabel(stringResource(R.string.icon_import_overwrite))
                 }
                 Button(
                     modifier = Modifier.weight(1f),
                     onClick = onAddOnly,
                     enabled = (preview?.selectedNewCount ?: 0) > 0,
                 ) {
-                    Text(stringResource(R.string.icon_import_add_only))
+                    ButtonLabel(stringResource(R.string.icon_import_add_only))
                 }
             }
         }

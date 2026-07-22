@@ -92,17 +92,17 @@ fun ConfirmDeleteDialog(
                     modifier = Modifier.weight(1f),
                     onClick = { project?.let(onDelete) },
                 ) {
-                    Text(stringResource(R.string.action_delete))
+                    ButtonLabel(stringResource(R.string.action_delete))
                 }
                 Button(
                     modifier = Modifier.weight(1f),
                     onClick = { project?.let(onMoveToTrash) },
                 ) {
-                    Text(stringResource(R.string.action_move_to_trash))
+                    ButtonLabel(stringResource(R.string.action_move_to_trash))
                 }
             }
             Button(modifier = Modifier.fillMaxWidth(), onClick = onDismiss) {
-                Text(stringResource(R.string.action_cancel))
+                ButtonLabel(stringResource(R.string.action_cancel))
             }
         }
     }
@@ -157,7 +157,7 @@ fun RenameProjectDialog(
                         onDismiss()
                     },
                 ) {
-                    Text(stringResource(R.string.action_cancel))
+                    ButtonLabel(stringResource(R.string.action_cancel))
                 }
                 Button(
                     modifier = Modifier.weight(1f),
@@ -167,7 +167,7 @@ fun RenameProjectDialog(
                     },
                     enabled = name.text.trim().isNotEmpty(),
                 ) {
-                    Text(stringResource(R.string.action_confirm))
+                    ButtonLabel(stringResource(R.string.action_confirm))
                 }
             }
         }
@@ -211,7 +211,7 @@ fun ExportDialog(
                 val errors = validate(p.id, ExportFormat.Mtz)
                 if (errors.isEmpty()) onExport(p, ExportFormat.Mtz)
                 else onValidationFailed(p, ExportFormat.Mtz, errors)
-            }, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.export_mtz)) }
+            }, modifier = Modifier.fillMaxWidth()) { ButtonLabel(stringResource(R.string.export_mtz)) }
             Button(onClick = {
                 if (p == null) return@Button
                 visible = false
@@ -219,7 +219,7 @@ fun ExportDialog(
                 val errors = validate(p.id, ExportFormat.ModuleZip)
                 if (errors.isEmpty()) onExport(p, ExportFormat.ModuleZip)
                 else onValidationFailed(p, ExportFormat.ModuleZip, errors)
-            }, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.export_module_zip)) }
+            }, modifier = Modifier.fillMaxWidth()) { ButtonLabel(stringResource(R.string.export_module_zip)) }
             Button(onClick = {
                 if (p == null) return@Button
                 visible = false
@@ -227,11 +227,11 @@ fun ExportDialog(
                 val errors = validate(p.id, ExportFormat.Apk)
                 if (errors.isEmpty()) onExport(p, ExportFormat.Apk)
                 else onValidationFailed(p, ExportFormat.Apk, errors)
-            }, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.export_apk)) }
+            }, modifier = Modifier.fillMaxWidth()) { ButtonLabel(stringResource(R.string.export_apk)) }
             Button(modifier = Modifier.fillMaxWidth(), onClick = {
                 visible = false
                 onDismiss()
-            }) { Text(stringResource(R.string.action_cancel)) }
+            }) { ButtonLabel(stringResource(R.string.action_cancel)) }
         }
     }
 }
@@ -250,10 +250,10 @@ fun ExportValidationDialog(
     ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Button(modifier = Modifier.weight(1f), onClick = onComplete) {
-                Text(stringResource(R.string.action_edit_info))
+                ButtonLabel(stringResource(R.string.action_edit_info))
             }
             Button(modifier = Modifier.weight(1f), onClick = onDismiss) {
-                Text(stringResource(R.string.action_confirm))
+                ButtonLabel(stringResource(R.string.action_confirm))
             }
         }
     }
@@ -276,10 +276,10 @@ fun MessageDialog(
         if (canUndo) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Button(modifier = Modifier.weight(1f), onClick = onDismiss) {
-                    Text(stringResource(R.string.action_confirm))
+                    ButtonLabel(stringResource(R.string.action_confirm))
                 }
                 Button(modifier = Modifier.weight(1f), onClick = onUndo) {
-                    Text(stringResource(R.string.action_undo))
+                    ButtonLabel(stringResource(R.string.action_undo))
                 }
             }
         } else {
@@ -287,7 +287,7 @@ fun MessageDialog(
                 modifier = Modifier.fillMaxWidth(),
                 onClick = onDismiss,
             ) {
-                Text(stringResource(R.string.action_confirm))
+                ButtonLabel(stringResource(R.string.action_confirm))
             }
         }
     }

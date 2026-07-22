@@ -3,6 +3,7 @@ package com.bocchi.iconeditor.ui.component
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import top.yukonga.miuix.kmp.basic.Button
 import top.yukonga.miuix.kmp.basic.Text
@@ -25,6 +26,7 @@ fun CompactAssetActionButton(
         Text(
             text = text,
             style = MiuixTheme.textStyles.footnote1,
+            fontWeight = FontWeight.Normal,
         )
     }
 }

@@ -40,6 +40,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.bocchi.iconeditor.R
 import com.bocchi.iconeditor.data.sync.ProjectSyncConnectionParser
+import com.bocchi.iconeditor.ui.component.ButtonLabel
 import com.google.mlkit.vision.barcode.BarcodeScanner
 import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.BarcodeScanning
@@ -272,7 +273,7 @@ private fun QrScannerScreen(
                 .fillMaxWidth()
                 .padding(horizontal = 24.dp, vertical = 48.dp),
         ) {
-            Text(stringResource(R.string.action_cancel))
+            ButtonLabel(stringResource(R.string.action_cancel))
         }
     }
 }

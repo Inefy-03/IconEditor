@@ -28,6 +28,7 @@ import com.bocchi.iconeditor.R
 import com.bocchi.iconeditor.data.ApkPackAssets
 import com.bocchi.iconeditor.data.ThemePackAssets
 import com.bocchi.iconeditor.model.SpecialAssetsTab
+import com.bocchi.iconeditor.ui.component.ButtonLabel
 import com.bocchi.iconeditor.ui.component.CompactAssetActionButton
 import java.io.File
 import top.yukonga.miuix.kmp.basic.Button
@@ -148,7 +149,7 @@ private fun MaskAssetsList(
                     .padding(start = 12.dp, end = 12.dp, bottom = 6.dp),
                 onClick = onImportMaskFromPack,
             ) {
-                Text(stringResource(R.string.mask_import_from_pack))
+                ButtonLabel(stringResource(R.string.mask_import_from_pack))
             }
         }
 

@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import com.bocchi.iconeditor.R
 import com.bocchi.iconeditor.model.ProjectMetadata
 import com.bocchi.iconeditor.model.TrashEntry
+import com.bocchi.iconeditor.ui.component.ButtonLabel
 import com.bocchi.iconeditor.ui.component.EmptyState
 import com.bocchi.iconeditor.ui.component.label
 import top.yukonga.miuix.kmp.basic.Button
@@ -89,7 +90,7 @@ fun TrashPage(
                             .height(TrashActionHeight),
                         onClick = { confirmEmpty = true },
                     ) {
-                        Text(stringResource(R.string.action_empty_trash))
+                        ButtonLabel(stringResource(R.string.action_empty_trash))
                     }
                 }
             }
@@ -223,7 +224,7 @@ fun TrashPage(
                     .height(TrashActionHeight),
                 onClick = { purgeTarget = null },
             ) {
-                Text(stringResource(R.string.action_cancel))
+                ButtonLabel(stringResource(R.string.action_cancel))
             }
             Button(
                 modifier = Modifier
@@ -234,7 +235,7 @@ fun TrashPage(
                     purgeTarget = null
                 },
             ) {
-                Text(stringResource(R.string.action_confirm))
+                ButtonLabel(stringResource(R.string.action_confirm))
             }
         }
     }
@@ -252,7 +253,7 @@ fun TrashPage(
                     .height(TrashActionHeight),
                 onClick = { confirmEmpty = false },
             ) {
-                Text(stringResource(R.string.action_cancel))
+                ButtonLabel(stringResource(R.string.action_cancel))
             }
             Button(
                 modifier = Modifier
@@ -263,7 +264,7 @@ fun TrashPage(
                     onEmpty()
                 },
             ) {
-                Text(stringResource(R.string.action_confirm))
+                ButtonLabel(stringResource(R.string.action_confirm))
             }
         }
     }

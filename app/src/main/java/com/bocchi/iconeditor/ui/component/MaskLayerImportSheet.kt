@@ -72,10 +72,10 @@ fun MaskLayerImportConfirmDialog(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Button(modifier = Modifier.weight(1f), onClick = onSelectAll) {
-                        Text(stringResource(R.string.icon_import_select_all))
+                        ButtonLabel(stringResource(R.string.icon_import_select_all))
                     }
                     Button(modifier = Modifier.weight(1f), onClick = onSelectNone) {
-                        Text(stringResource(R.string.icon_import_select_none))
+                        ButtonLabel(stringResource(R.string.icon_import_select_none))
                     }
                 }
                 current.items.forEach { item ->
@@ -91,10 +91,10 @@ fun MaskLayerImportConfirmDialog(
                 onClick = onImport,
                 enabled = (preview?.selectedCount ?: 0) > 0,
             ) {
-                Text(stringResource(R.string.mask_import_apply))
+                ButtonLabel(stringResource(R.string.mask_import_apply))
             }
             Button(modifier = Modifier.fillMaxWidth(), onClick = onDismiss) {
-                Text(stringResource(R.string.action_cancel))
+                ButtonLabel(stringResource(R.string.action_cancel))
             }
         }
     }

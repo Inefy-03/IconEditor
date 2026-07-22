@@ -51,6 +51,7 @@ import androidx.compose.ui.unit.sp
 import com.bocchi.iconeditor.model.IconAsset
 import com.bocchi.iconeditor.R
 import com.bocchi.iconeditor.model.IconListItem
+import com.bocchi.iconeditor.ui.component.ButtonLabel
 import com.bocchi.iconeditor.ui.component.navigationBarBottomPadding
 import com.bocchi.iconeditor.ui.component.EmptyState
 import com.bocchi.iconeditor.ui.component.withPageMargins
@@ -528,199 +529,225 @@ fun IconActionSheet(
     val appNameLabel = stringResource(R.string.app_name_label)
     val packageNameLabel = stringResource(R.string.package_name_label)
     val exportImageLabel = stringResource(R.string.export_image)
-    val sheetContentPadding = PaddingValues(
-        bottom = navigationBarBottomPadding() + 16.dp,
-    ).withScrollableImeSafeArea()
-    LazyColumn(
+    val styleListContentPadding = PaddingValues().withScrollableImeSafeArea()
+    val headerContent: @Composable (includeAliasFields: Boolean) -> Unit = { includeAliasFields ->
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(
+                    if (includeAliasFields) {
+                        Modifier
+                    } else {
+                        Modifier.padding(bottom = 12.dp)
+                    },
+                ),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            if (!isNew || draftAdditions.isNotEmpty()) {
+                Box(
+                    modifier = Modifier.then(
+                        if (!isNew && canExportImage) {
+                            Modifier.combinedClickable(
+                                onLongClickLabel = exportImageLabel,
+                                onClick = {},
+                                onLongClick = { exportLauncher.launch(exportFileName) },
+                            )
+                        } else {
+                            Modifier
+                        },
+                    ),
+                ) {
+                    IconPreview(
+                        file = exportPreviewVariant?.let(iconFile),
+                        uri = previewUri,
+                        packageName = draftPackageName.ifBlank { iconItem.packageName }.ifBlank { null },
+                        size = 100.dp,
+                        imageSize = 90.dp,
+                    )
+                }
+            }
+            LabeledField(
+                label = appNameLabel,
+                value = draftAppName,
+                onChange = onAppNameChange,
+            )
+            LabeledField(
+                label = packageNameLabel,
+                value = draftPackageName,
+                onChange = onPackageNameChange,
+            )
+            if (includeAliasFields) {
+                SmallTitle(
+                    text = stringResource(R.string.alias_package_section_title),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp),
+                    insideMargin = PaddingValues(0.dp),
+                )
+                draftAliasPackageNames.forEachIndexed { index, alias ->
+                    LabeledField(
+                        label = packageNameLabel,
+                        value = alias,
+                        trailingIcon = {
+                            IconButton(
+                                onClick = {
+                                    onAliasPackageNamesChange(
+                                        draftAliasPackageNames.toMutableList().also {
+                                            it.removeAt(index)
+                                        },
+                                    )
+                                },
+                            ) {
+                                Icon(
+                                    MiuixIcons.Undo,
+                                    contentDescription = stringResource(R.string.action_delete),
+                                )
+                            }
+                        },
+                        onChange = { value ->
+                            onAliasPackageNamesChange(
+                                draftAliasPackageNames.toMutableList().also {
+                                    it[index] = value
+                                },
+                            )
+                        },
+                    )
+                }
+                Button(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = { onAliasPackageNamesChange(draftAliasPackageNames + "") },
+                ) {
+                    ButtonLabel(stringResource(R.string.alias_package_add))
+                }
+            }
+        }
+    }
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(max = 760.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-        contentPadding = sheetContentPadding,
     ) {
-        item(key = "icon-sheet-header") {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                if (!isNew || draftAdditions.isNotEmpty()) {
-                    Box(
-                        modifier = Modifier.then(
-                            if (!isNew && canExportImage) {
-                                Modifier.combinedClickable(
-                                    onLongClickLabel = exportImageLabel,
-                                    onClick = {},
-                                    onLongClick = { exportLauncher.launch(exportFileName) },
-                                )
-                            } else {
-                                Modifier
-                            },
-                        ),
-                    ) {
-                        IconPreview(
-                            file = exportPreviewVariant?.let(iconFile),
-                            uri = previewUri,
-                            packageName = draftPackageName.ifBlank { iconItem.packageName }.ifBlank { null },
-                            size = 100.dp,
-                            imageSize = 90.dp,
-                        )
-                    }
-                }
-                LabeledField(
-                    label = appNameLabel,
-                    value = draftAppName,
-                    onChange = onAppNameChange,
-                )
-                LabeledField(
-                    label = packageNameLabel,
-                    value = draftPackageName,
-                    onChange = onPackageNameChange,
-                )
-                if (isNew) {
-                    SmallTitle(
-                        text = stringResource(R.string.alias_package_section_title),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 4.dp),
-                        insideMargin = PaddingValues(0.dp),
-                    )
-                    draftAliasPackageNames.forEachIndexed { index, alias ->
-                        LabeledField(
-                            label = packageNameLabel,
-                            value = alias,
-                            trailingIcon = {
-                                IconButton(
-                                    onClick = {
-                                        onAliasPackageNamesChange(
-                                            draftAliasPackageNames.toMutableList().also {
-                                                it.removeAt(index)
-                                            },
-                                        )
-                                    },
-                                ) {
-                                    Icon(
-                                        MiuixIcons.Undo,
-                                        contentDescription = stringResource(R.string.action_delete),
-                                    )
-                                }
-                            },
-                            onChange = { value ->
-                                onAliasPackageNamesChange(
-                                    draftAliasPackageNames.toMutableList().also {
-                                        it[index] = value
-                                    },
-                                )
-                            },
-                        )
-                    }
-                    Button(
-                        modifier = Modifier.fillMaxWidth(),
-                        onClick = { onAliasPackageNamesChange(draftAliasPackageNames + "") },
-                    ) {
-                        Text(stringResource(R.string.alias_package_add))
-                    }
+        if (!isNew) {
+            headerContent(false)
+        }
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f, fill = false),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            contentPadding = styleListContentPadding,
+        ) {
+            if (isNew) {
+                item(key = "icon-sheet-header") {
+                    headerContent(true)
                 }
             }
-        }
 
-        itemsIndexed(iconItem.variants, key = { _, variant -> variant.variantKey }) { index, variant ->
-            val selected = draftSelectedAdditionIndex == null && draftVariantKey == variant.variantKey
-            val replacementUri = replacementUris[variant.archivePath]
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                insideMargin = PaddingValues(start = 12.dp, end = 12.dp, top = 10.dp, bottom = 10.dp),
-                colors = CardDefaults.defaultColors(
-                    color = MiuixTheme.colorScheme.secondaryContainer.copy(alpha = 0.42f),
-                ),
-                onClick = { onSelectExistingVariant(variant.variantKey) },
-                onLongPress = {
-                    pendingDeleteIndex = index
-                    pendingDelete = variant
-                    pendingDeleteAdditionIndex = -1
-                },
-                showIndication = true,
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconPreview(
-                        file = iconFile(variant),
-                        uri = replacementUri,
-                        packageName = iconItem.packageName,
-                    )
-                    Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(stringResource(R.string.style_number, index + 1), fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
-                    if (selected) {
-                        Tag(stringResource(R.string.current_style))
-                    }
-                }
-            }
-        }
-
-        itemsIndexed(
-            items = draftAdditions,
-            key = { index, uri -> "draft-addition-$index-$uri" },
-        ) { index, uri ->
-            val selected = draftSelectedAdditionIndex == index
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                insideMargin = PaddingValues(start = 12.dp, end = 12.dp, top = 10.dp, bottom = 10.dp),
-                colors = CardDefaults.defaultColors(
-                    color = MiuixTheme.colorScheme.secondaryContainer.copy(alpha = 0.42f),
-                ),
-                onClick = { onSelectAddition(index) },
-                onLongPress = {
-                    pendingDelete = null
-                    pendingDeleteIndex = iconItem.variants.size + index
-                    pendingDeleteAdditionIndex = index
-                },
-                showIndication = true,
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconPreview(
-                        file = null,
-                        uri = uri,
-                        packageName = iconItem.packageName,
-                    )
-                    Spacer(Modifier.width(12.dp))
-                    Text(
-                        modifier = Modifier.weight(1f),
-                        text = stringResource(R.string.style_number, iconItem.variants.size + index + 1),
-                        fontWeight = FontWeight.Medium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    if (selected) {
-                        Tag(stringResource(R.string.current_style))
-                    }
-                }
-            }
-        }
-
-        item(key = "icon-sheet-actions") {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Button(
-                    modifier = Modifier.weight(1f),
-                    onClick = onStageAdd,
-                ) {
-                    Text(stringResource(R.string.add_image))
-                }
-                Button(
-                    modifier = Modifier.weight(1f),
-                    enabled = hasSelectedStyle,
-                    onClick = {
-                        when {
-                            draftSelectedAdditionIndex != null ->
-                                onStageReplaceAddition(draftSelectedAdditionIndex)
-                            previewVariant != null -> onStageReplace(previewVariant)
-                            iconItem.selected != null -> onStageReplace(iconItem.selected)
-                            else -> Unit
-                        }
+            itemsIndexed(iconItem.variants, key = { _, variant -> variant.variantKey }) { index, variant ->
+                val selected = draftSelectedAdditionIndex == null && draftVariantKey == variant.variantKey
+                val replacementUri = replacementUris[variant.archivePath]
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    insideMargin = PaddingValues(start = 12.dp, end = 12.dp, top = 10.dp, bottom = 10.dp),
+                    colors = CardDefaults.defaultColors(
+                        color = MiuixTheme.colorScheme.secondaryContainer.copy(alpha = 0.42f),
+                    ),
+                    onClick = { onSelectExistingVariant(variant.variantKey) },
+                    onLongPress = {
+                        pendingDeleteIndex = index
+                        pendingDelete = variant
+                        pendingDeleteAdditionIndex = -1
                     },
+                    showIndication = true,
                 ) {
-                    Text(stringResource(R.string.import_replace))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconPreview(
+                            file = iconFile(variant),
+                            uri = replacementUri,
+                            packageName = iconItem.packageName,
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(stringResource(R.string.style_number, index + 1), fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        if (selected) {
+                            Tag(stringResource(R.string.current_style))
+                        }
+                    }
                 }
+            }
+
+            itemsIndexed(
+                items = draftAdditions,
+                key = { index, uri -> "draft-addition-$index-$uri" },
+            ) { index, uri ->
+                val selected = draftSelectedAdditionIndex == index
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    insideMargin = PaddingValues(start = 12.dp, end = 12.dp, top = 10.dp, bottom = 10.dp),
+                    colors = CardDefaults.defaultColors(
+                        color = MiuixTheme.colorScheme.secondaryContainer.copy(alpha = 0.42f),
+                    ),
+                    onClick = { onSelectAddition(index) },
+                    onLongPress = {
+                        pendingDelete = null
+                        pendingDeleteIndex = iconItem.variants.size + index
+                        pendingDeleteAdditionIndex = index
+                    },
+                    showIndication = true,
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconPreview(
+                            file = null,
+                            uri = uri,
+                            packageName = iconItem.packageName,
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            modifier = Modifier.weight(1f),
+                            text = stringResource(R.string.style_number, iconItem.variants.size + index + 1),
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        if (selected) {
+                            Tag(stringResource(R.string.current_style))
+                        }
+                    }
+                }
+            }
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(
+                    top = 6.dp,
+                    bottom = navigationBarBottomPadding() + 16.dp,
+                ),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Button(
+                modifier = Modifier.weight(1f),
+                onClick = onStageAdd,
+            ) {
+                ButtonLabel(stringResource(R.string.add_image))
+            }
+            Button(
+                modifier = Modifier.weight(1f),
+                enabled = hasSelectedStyle,
+                onClick = {
+                    when {
+                        draftSelectedAdditionIndex != null ->
+                            onStageReplaceAddition(draftSelectedAdditionIndex)
+                        previewVariant != null -> onStageReplace(previewVariant)
+                        iconItem.selected != null -> onStageReplace(iconItem.selected)
+                        else -> Unit
+                    }
+                },
+            ) {
+                ButtonLabel(stringResource(R.string.import_replace))
             }
         }
     }
@@ -732,13 +759,15 @@ fun IconActionSheet(
         onDismissRequest = ::clearPendingDelete,
     ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Button(modifier = Modifier.weight(1f), onClick = ::clearPendingDelete) { Text(stringResource(R.string.action_cancel)) }
+            Button(modifier = Modifier.weight(1f), onClick = ::clearPendingDelete) {
+                ButtonLabel(stringResource(R.string.action_cancel))
+            }
             Button(modifier = Modifier.weight(1f), onClick = {
                 pendingDelete?.let(onDeleteIcon)
                 if (pendingDeleteAdditionIndex >= 0) onDeleteAddition(pendingDeleteAdditionIndex)
                 clearPendingDelete()
             }) {
-                Text(stringResource(R.string.action_confirm))
+                ButtonLabel(stringResource(R.string.action_confirm))
             }
         }
     }

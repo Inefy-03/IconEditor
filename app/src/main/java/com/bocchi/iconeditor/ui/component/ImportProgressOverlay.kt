@@ -125,14 +125,14 @@ fun ExportProgressOverlay(
                 enabled = progress.logs.isNotEmpty(),
                 onClick = { showLogs = true },
             ) {
-                Text(stringResource(R.string.export_view_logs))
+                ButtonLabel(stringResource(R.string.export_view_logs))
             }
             if (progress.success && onOpenDirectory != null) {
                 Button(
                     modifier = Modifier.fillMaxWidth(),
                     onClick = onOpenDirectory,
                 ) {
-                    Text(stringResource(R.string.export_open_directory))
+                    ButtonLabel(stringResource(R.string.export_open_directory))
                 }
             }
             if (canInstall) {
@@ -144,13 +144,13 @@ fun ExportProgressOverlay(
                         modifier = Modifier.weight(1f),
                         onClick = ::requestDismiss,
                     ) {
-                        Text(stringResource(R.string.export_apk_install_no))
+                        ButtonLabel(stringResource(R.string.export_apk_install_no))
                     }
                     Button(
                         modifier = Modifier.weight(1f),
                         onClick = { onInstall(requireNotNull(installUri)) },
                     ) {
-                        Text(stringResource(R.string.export_apk_install_yes))
+                        ButtonLabel(stringResource(R.string.export_apk_install_yes))
                     }
                 }
             }
@@ -159,7 +159,7 @@ fun ExportProgressOverlay(
                     modifier = Modifier.fillMaxWidth(),
                     onClick = ::requestDismiss,
                 ) {
-                    Text(
+                    ButtonLabel(
                         stringResource(
                             if (progress.success) {
                                 R.string.export_close_success
@@ -297,7 +297,7 @@ private fun ExportLogSheet(
                     ).show()
                 },
             ) {
-                Text(stringResource(R.string.export_copy_logs))
+                ButtonLabel(stringResource(R.string.export_copy_logs))
             }
         }
     }

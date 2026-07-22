@@ -41,6 +41,7 @@ import com.bocchi.iconeditor.data.sync.ProjectSyncAction
 import com.bocchi.iconeditor.data.sync.ProjectSyncDiffItem
 import com.bocchi.iconeditor.data.sync.ProjectSyncDiffPreview
 import com.bocchi.iconeditor.data.sync.ProjectSyncKind
+import com.bocchi.iconeditor.ui.component.ButtonLabel
 import java.io.File
 import top.yukonga.miuix.kmp.basic.Button
 import top.yukonga.miuix.kmp.basic.Icon
@@ -248,10 +249,10 @@ fun ProjectSyncDiffDialog(
             )
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
                 Button(modifier = Modifier.weight(1f), onClick = onSelectPushLocal) {
-                    Text(stringResource(R.string.sync_select_local_added))
+                    ButtonLabel(stringResource(R.string.sync_select_local_added))
                 }
                 Button(modifier = Modifier.weight(1f), onClick = onSelectDeleteLocal) {
-                    Text(stringResource(R.string.sync_select_peer_deleted))
+                    ButtonLabel(stringResource(R.string.sync_select_peer_deleted))
                 }
             }
             Text(
@@ -266,18 +267,18 @@ fun ProjectSyncDiffDialog(
             )
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
                 Button(modifier = Modifier.weight(1f), onClick = onSelectPullRemote) {
-                    Text(stringResource(R.string.sync_select_remote_added))
+                    ButtonLabel(stringResource(R.string.sync_select_remote_added))
                 }
                 Button(modifier = Modifier.weight(1f), onClick = onSelectDeleteRemote) {
-                    Text(stringResource(R.string.sync_select_local_deleted))
+                    ButtonLabel(stringResource(R.string.sync_select_local_deleted))
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 Button(modifier = Modifier.weight(1f), onClick = onSelectAll) {
-                    Text(stringResource(R.string.icon_import_select_all))
+                    ButtonLabel(stringResource(R.string.icon_import_select_all))
                 }
                 Button(modifier = Modifier.weight(1f), onClick = onSelectNone) {
-                    Text(stringResource(R.string.icon_import_select_none))
+                    ButtonLabel(stringResource(R.string.icon_import_select_none))
                 }
             }
             LazyColumn(
@@ -299,14 +300,14 @@ fun ProjectSyncDiffDialog(
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 Button(modifier = Modifier.weight(1f), onClick = onDismiss) {
-                    Text(stringResource(R.string.action_cancel))
+                    ButtonLabel(stringResource(R.string.action_cancel))
                 }
                 Button(
                     modifier = Modifier.weight(1f),
                     onClick = onApply,
                     enabled = !busy && current.selectedCount > 0,
                 ) {
-                    Text(stringResource(R.string.sync_apply))
+                    ButtonLabel(stringResource(R.string.sync_apply))
                 }
             }
         }
@@ -395,7 +396,7 @@ private fun SyncDiffRow(
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 actionsFor(item).forEach { action ->
                     Button(onClick = { onAction(action) }) {
-                        Text(
+                        ButtonLabel(
                             text = actionLabel(action, item),
                             color = if (item.action == action) {
                                 MiuixTheme.colorScheme.primary
