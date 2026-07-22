@@ -66,6 +66,7 @@ import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Close
 import top.yukonga.miuix.kmp.icon.extended.All
 import top.yukonga.miuix.kmp.icon.extended.Ok
+import top.yukonga.miuix.kmp.icon.extended.Undo
 import top.yukonga.miuix.kmp.overlay.OverlayBottomSheet
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.preference.ArrowPreference
@@ -579,35 +580,39 @@ fun IconActionSheet(
                 if (isNew) {
                     SmallTitle(
                         text = stringResource(R.string.alias_package_section_title),
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 4.dp),
                         insideMargin = PaddingValues(0.dp),
                     )
                     draftAliasPackageNames.forEachIndexed { index, alias ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            LabeledField(
-                                label = packageNameLabel,
-                                value = alias,
-                                modifier = Modifier.weight(1f),
-                                onChange = { value ->
-                                    onAliasPackageNamesChange(
-                                        draftAliasPackageNames.toMutableList().also { it[index] = value },
+                        LabeledField(
+                            label = packageNameLabel,
+                            value = alias,
+                            trailingIcon = {
+                                IconButton(
+                                    onClick = {
+                                        onAliasPackageNamesChange(
+                                            draftAliasPackageNames.toMutableList().also {
+                                                it.removeAt(index)
+                                            },
+                                        )
+                                    },
+                                ) {
+                                    Icon(
+                                        MiuixIcons.Undo,
+                                        contentDescription = stringResource(R.string.action_delete),
                                     )
-                                },
-                            )
-                            IconButton(
-                                onClick = {
-                                    onAliasPackageNamesChange(
-                                        draftAliasPackageNames.toMutableList().also { it.removeAt(index) },
-                                    )
-                                },
-                            ) {
-                                Icon(MiuixIcons.Close, contentDescription = stringResource(R.string.action_close))
-                            }
-                        }
+                                }
+                            },
+                            onChange = { value ->
+                                onAliasPackageNamesChange(
+                                    draftAliasPackageNames.toMutableList().also {
+                                        it[index] = value
+                                    },
+                                )
+                            },
+                        )
                     }
                     Button(
                         modifier = Modifier.fillMaxWidth(),

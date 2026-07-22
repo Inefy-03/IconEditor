@@ -102,6 +102,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         private set
     var trashEntries by mutableStateOf<List<com.bocchi.iconeditor.model.TrashEntry>>(emptyList())
         private set
+    var trashMetadata by mutableStateOf<Map<String, ProjectMetadata>>(emptyMap())
+        private set
     var isProjectLoading by mutableStateOf(false)
         private set
     var isImporting by mutableStateOf(false)
@@ -200,7 +202,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         projects = repository.loadProjects()
         projectMetadata = projects.associate { it.id to repository.loadMetadata(it.id) }
         settings = repository.loadSettings()
-        trashEntries = repository.loadTrash()
+        refreshTrash()
         selectedProjectId?.let { loadProject(it, loadIcons = false) }
     }
 
@@ -231,7 +233,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun refreshTrash() {
-        trashEntries = repository.loadTrash()
+        val entries = repository.loadTrash()
+        trashEntries = entries
+        trashMetadata = entries.associate { entry ->
+            entry.project.id to repository.loadTrashMetadata(entry.project.id)
+        }
     }
 
     fun restoreTrashProject(id: String) = runAction {
@@ -1304,7 +1310,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 syncServerWanted = true,
             ),
         )
-        syncStatusMessage = getApplication<Application>().getString(R.string.sync_mutual_paired)
+        toastMessageText = getApplication<Application>().getString(R.string.sync_mutual_paired)
     }
 
     private fun registerSelfWithConfiguredPeer() {
@@ -1322,7 +1328,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         ),
                     )
                 }
-                syncStatusMessage = getApplication<Application>().getString(R.string.sync_mutual_paired)
+                toastMessageText = getApplication<Application>().getString(R.string.sync_mutual_paired)
             }
         }
     }
@@ -1387,7 +1393,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         ),
                     )
                 }
-                syncStatusMessage = getApplication<Application>().getString(R.string.sync_mutual_paired)
+                toastMessageText = getApplication<Application>().getString(R.string.sync_mutual_paired)
             } catch (error: Throwable) {
                 if (error is CancellationException) throw error
                 showError(error)
@@ -1410,7 +1416,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 syncServerWanted = true,
             ),
         )
-        syncStatusMessage = getApplication<Application>().getString(R.string.sync_scan_filled)
+        syncStatusMessage = null
         ensureLocalServerAndRegisterWithPeer()
         return true
     }
@@ -1434,11 +1440,18 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun probeSyncPeer() {
+        val hasCompletePeer = syncPeerHost.isNotBlank() &&
+            syncPeerPort.toIntOrNull()?.let { it in 1..65535 } == true &&
+            syncPeerToken.isNotBlank()
+        if (!hasCompletePeer) {
+            toastMessageText = getApplication<Application>().getString(R.string.sync_peer_incomplete)
+            return
+        }
         viewModelScope.launch {
             syncBusy = true
             try {
                 val ok = withContext(Dispatchers.IO) { makeSyncClient().health() }
-                syncStatusMessage = getApplication<Application>().getString(
+                toastMessageText = getApplication<Application>().getString(
                     if (ok) R.string.sync_status_ok else R.string.sync_status_fail,
                 )
             } catch (error: Throwable) {

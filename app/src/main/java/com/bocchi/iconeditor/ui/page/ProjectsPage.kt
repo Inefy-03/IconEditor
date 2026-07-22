@@ -22,23 +22,13 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
-import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.unit.Velocity
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
@@ -77,7 +67,6 @@ fun ProjectsPage(
     sortField: ProjectSortField = ProjectSortField.CreatedAt,
     contentPadding: PaddingValues = PaddingValues(12.dp),
     scrollToTopRequest: Int = 0,
-    onImportFabVisibilityChanged: (Boolean) -> Unit = {},
     onEditInfo: (ProjectSummary) -> Unit,
     onEditIcons: (ProjectSummary) -> Unit,
     onRename: (ProjectSummary) -> Unit,
@@ -85,69 +74,12 @@ fun ProjectsPage(
     onExport: (ProjectSummary) -> Unit,
 ) {
     val gridState = key(sortField) { rememberLazyGridState() }
-    val density = LocalDensity.current
-    val flingThreshold = with(density) { 1_000.dp.toPx() }
-    val latestFabVisibilityChanged by rememberUpdatedState(onImportFabVisibilityChanged)
-    var scrollDistance by remember { mutableFloatStateOf(0f) }
-    var reportedFabVisible by remember { mutableStateOf(true) }
-    fun updateFabVisibility(visible: Boolean) {
-        if (reportedFabVisible == visible) return
-        reportedFabVisible = visible
-        latestFabVisibilityChanged(visible)
-    }
-    val fabScrollConnection = remember(gridState, flingThreshold) {
-        object : NestedScrollConnection {
-            private fun isScrolledToEnd(): Boolean {
-                val layoutInfo = gridState.layoutInfo
-                val lastItem = layoutInfo.visibleItemsInfo.lastOrNull() ?: return true
-                return lastItem.index == layoutInfo.totalItemsCount - 1 &&
-                    lastItem.offset.y + lastItem.size.height <= layoutInfo.viewportEndOffset
-            }
-
-            override fun onPreScroll(available: Offset, source: androidx.compose.ui.input.nestedscroll.NestedScrollSource): Offset {
-                if (!isScrolledToEnd()) {
-                    scrollDistance += available.y
-                    when {
-                        scrollDistance < -50f -> {
-                            updateFabVisibility(false)
-                            scrollDistance = 0f
-                        }
-                        scrollDistance > 50f -> {
-                            updateFabVisibility(true)
-                            scrollDistance = 0f
-                        }
-                    }
-                }
-                return Offset.Zero
-            }
-
-            override suspend fun onPreFling(available: Velocity): Velocity {
-                if (!isScrolledToEnd() && kotlin.math.abs(available.y) >= flingThreshold) {
-                    updateFabVisibility(available.y > 0f)
-                    scrollDistance = 0f
-                }
-                return Velocity.Zero
-            }
-        }
-    }
     val sortedProjects = remember(projects, metadata, sortField) {
         sortProjects(projects, metadata, sortField)
-    }
-    LaunchedEffect(gridState) {
-        scrollDistance = 0f
-        updateFabVisibility(true)
-    }
-    LaunchedEffect(projects.isEmpty()) {
-        if (projects.isEmpty()) {
-            scrollDistance = 0f
-            updateFabVisibility(true)
-        }
     }
     LaunchedEffect(scrollToTopRequest) {
         if (scrollToTopRequest > 0 && projects.isNotEmpty()) {
             gridState.scrollToItem(0)
-            scrollDistance = 0f
-            updateFabVisibility(true)
         }
     }
     if (projects.isEmpty()) {
@@ -180,8 +112,7 @@ fun ProjectsPage(
             modifier = Modifier
                 .fillMaxSize()
                 .scrollEndHaptic()
-                .overScrollVertical()
-                .nestedScroll(fabScrollConnection),
+                .overScrollVertical(),
             state = gridState,
             columns = GridCells.Adaptive(350.dp),
             contentPadding = contentPadding,
@@ -393,6 +324,7 @@ fun ProjectActionButton(
     contentDescription: String,
     onClick: () -> Unit,
     danger: Boolean = false,
+    label: String? = null,
 ) {
     val backgroundColor = if (danger) {
         MiuixTheme.colorScheme.errorContainer
@@ -407,11 +339,33 @@ fun ProjectActionButton(
         backgroundColor = backgroundColor,
         onClick = onClick,
     ) {
-        Icon(
-            modifier = Modifier.size(20.dp),
-            imageVector = imageVector,
-            tint = tint,
-            contentDescription = contentDescription,
-        )
+        if (label == null) {
+            Icon(
+                modifier = Modifier.size(20.dp),
+                imageVector = imageVector,
+                tint = tint,
+                contentDescription = contentDescription,
+            )
+        } else {
+            Row(
+                modifier = Modifier.padding(horizontal = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    modifier = Modifier.size(20.dp),
+                    imageVector = imageVector,
+                    tint = tint,
+                    contentDescription = null,
+                )
+                Text(
+                    text = label,
+                    color = tint,
+                    style = MiuixTheme.textStyles.body2,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                )
+            }
+        }
     }
 }

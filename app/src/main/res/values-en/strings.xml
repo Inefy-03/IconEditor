@@ -14,7 +14,7 @@
 
     <string name="action_import_icons">Import icon pack</string>
     <string name="icon_import_title">Import icons</string>
-    <string name="icon_import_summary">Parsed %1$d\nConflicts %2$d · New %3$d · Selected %4$d</string>
+    <string name="icon_import_summary">Parsed %1$d\nSelected %2$d · New %3$d · Conflicts %4$d</string>
     <string name="icon_import_source_apk">APK icon pack</string>
     <string name="icon_import_source_mtz">MTZ theme</string>
     <string name="icon_import_source_module">Module</string>
@@ -170,6 +170,7 @@
 
     <string name="personalization">Personalization</string>
     <string name="language_title">Language</string>
+    <string name="language_follow_system">Follow system</string>
     <string name="language_simplified_chinese">简体中文</string>
     <string name="language_english">English</string>
     <string name="theme_settings_summary">Change the app theme</string>
@@ -260,12 +261,12 @@
     <string name="screen_project_sync">Project sync</string>
     <string name="sync_section_host">Host service</string>
     <string name="sync_section_connect">Connection</string>
-    <string name="sync_host_hint">When hosting, peers on the same Wi‑Fi can scan the QR. The scanner announces itself back so either side can Sync.</string>
+    <string name="sync_host_hint">After the sync service pairs successfully, either side can tap Sync to compare project files.</string>
     <string name="sync_server_toggle">Sync server</string>
     <string name="sync_server_toggle_off">Let peers on Wi‑Fi scan to pair</string>
     <string name="sync_server_running">Listening on %1$s:%2$d</string>
     <string name="sync_token_label">Token: %1$s</string>
-    <string name="sync_peer_host">Host (IP)</string>
+    <string name="sync_peer_host">IP</string>
     <string name="sync_peer_port">Port</string>
     <string name="sync_peer_token">Token</string>
     <string name="sync_save_peer">Save this connection</string>
@@ -275,7 +276,7 @@
     <string name="sync_scan_camera_hint">Point the camera at the sync QR code on Mac</string>
     <string name="sync_scan_unavailable">Unable to start QR scanning. Try again.</string>
     <string name="sync_scan_invalid">Unrecognized code. Scan an IconEditor sync QR.</string>
-    <string name="sync_scan_filled">Peer saved, completing mutual pairing…</string>
+    <string name="sync_scan_success">Scan successful</string>
     <string name="sync_mutual_paired">Paired both ways — either side can Sync</string>
     <string name="sync_no_lan_address">Could not get a LAN address. Check Wi‑Fi.</string>
     <string name="action_sync">Sync</string>
@@ -308,6 +309,7 @@
     <string name="sync_action_skip">Skip</string>
     <string name="sync_status_ok">Connected</string>
     <string name="sync_status_fail">No response</string>
+    <string name="sync_peer_incomplete">Enter the peer IP, port, and token</string>
     <string name="sync_status_applying">Syncing…</string>
     <string name="sync_status_progress">Syncing %1$d/%2$d</string>
     <string name="sync_status_progress_labeled">Syncing %1$d/%2$d · %3$s</string>

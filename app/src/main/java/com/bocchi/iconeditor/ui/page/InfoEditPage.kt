@@ -263,6 +263,7 @@ fun LabeledField(
     value: String,
     modifier: Modifier = Modifier,
     singleLine: Boolean = true,
+    trailingIcon: @Composable (() -> Unit)? = null,
     onChange: (String) -> Unit,
 ) {
     val bringIntoViewRequester = remember { BringIntoViewRequester() }
@@ -291,6 +292,7 @@ fun LabeledField(
         singleLine = singleLine,
         minLines = if (singleLine) 1 else 4,
         maxLines = if (singleLine) 1 else 8,
+        trailingIcon = trailingIcon,
         modifier = modifier
             .fillMaxWidth()
             .onSizeChanged { fieldSize = it }

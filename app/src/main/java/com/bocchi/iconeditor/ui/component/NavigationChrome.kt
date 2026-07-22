@@ -32,7 +32,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -49,7 +48,6 @@ import com.bocchi.iconeditor.model.SpecialAssetsTab
 import com.bocchi.iconeditor.model.ThemeMode
 import androidx.navigation3.runtime.NavKey
 import kotlinx.serialization.Serializable
-import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.DropdownImpl
 import top.yukonga.miuix.kmp.basic.DropdownItem
 import top.yukonga.miuix.kmp.basic.HorizontalDivider
@@ -142,7 +140,6 @@ fun RootPagerContent(
     pageBackground: Color,
     floatingBottomBar: Boolean,
     floatingBackdrop: LayerBackdrop,
-    onWidthChanged: (Int) -> Unit,
     projectsPage: @Composable () -> Unit,
     settingsPage: @Composable () -> Unit,
 ) {
@@ -154,7 +151,6 @@ fun RootPagerContent(
         modifier = Modifier
             .fillMaxSize()
             .overScrollHorizontal()
-            .onSizeChanged { onWidthChanged(it.width) }
             .then(
                 if (floatingBottomBar) {
                     Modifier.layerBackdrop(floatingBackdrop)
@@ -202,6 +198,7 @@ fun AppTopBar(
     scrollBehavior: ScrollBehavior,
     onBack: () -> Unit,
     onCreateProject: () -> Unit,
+    onImportProject: () -> Unit = {},
     iconPreferences: IconPreferences,
     onIconPreferences: (IconPreferences) -> Unit,
     projectSortField: ProjectSortField = ProjectSortField.CreatedAt,
@@ -250,6 +247,7 @@ fun AppTopBar(
                     )
                     ProjectMenuAction(
                         onCreateProject = onCreateProject,
+                        onImportProject = onImportProject,
                     )
                 }
                 Screen.Icons -> {
@@ -494,6 +492,7 @@ private fun ProjectSortAction(
 @Composable
 private fun ProjectMenuAction(
     onCreateProject: () -> Unit,
+    onImportProject: () -> Unit,
 ) {
     var showProjectMenu by remember { mutableStateOf(false) }
     Box {
@@ -508,11 +507,28 @@ private fun ProjectMenuAction(
             onDismissRequest = { showProjectMenu = false },
         ) {
             ListPopupColumn {
-                BasicComponent(
-                    title = stringResource(R.string.new_project),
-                    onClick = {
+                DropdownImpl(
+                    item = DropdownItem(text = stringResource(R.string.new_project)),
+                    optionSize = ProjectOptionsMenuCount,
+                    isSelected = false,
+                    index = 0,
+                    isFirst = true,
+                    isLast = false,
+                    onSelectedIndexChange = {
                         showProjectMenu = false
                         onCreateProject()
+                    },
+                )
+                DropdownImpl(
+                    item = DropdownItem(text = stringResource(R.string.action_import_project)),
+                    optionSize = ProjectOptionsMenuCount,
+                    isSelected = false,
+                    index = 1,
+                    isFirst = false,
+                    isLast = true,
+                    onSelectedIndexChange = {
+                        showProjectMenu = false
+                        onImportProject()
                     },
                 )
             }
@@ -649,6 +665,7 @@ private const val IconSortOptionCount = 3
 private const val IconFilterOptionCount = 4
 private const val IconOptionsMenuCount = 2
 private const val ProjectSortOptionCount = 3
+private const val ProjectOptionsMenuCount = 2
 
 @Composable
 fun MainBottomBar(

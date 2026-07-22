@@ -253,10 +253,12 @@ fun LanguageSpinner() {
     val configuration = LocalConfiguration.current
     val scope = rememberCoroutineScope()
     val currentLanguage = remember(context, configuration) { currentAppLanguage(context) }
+    val followSystem = stringResource(R.string.language_follow_system)
     val chinese = stringResource(R.string.language_simplified_chinese)
     val english = stringResource(R.string.language_english)
-    val options = remember(chinese, english) {
+    val options = remember(followSystem, chinese, english) {
         mapOf(
+            AppLanguage.FollowSystem to followSystem,
             AppLanguage.SimplifiedChinese to chinese,
             AppLanguage.English to english,
         )

@@ -182,6 +182,9 @@ class ProjectRepository(private val context: Context) {
     fun loadTrash(): List<TrashEntry> =
         readJson(trashIndexFile, TrashIndex()).entries.sortedByDescending { it.deletedAt }
 
+    fun loadTrashMetadata(id: String): ProjectMetadata =
+        readJson(File(trashProjectDir(id), "metadata.json"), ProjectMetadata())
+
     fun moveProjectToTrash(id: String) {
         val project = loadProjects().firstOrNull { it.id == id } ?: return
         val source = projectDir(id)

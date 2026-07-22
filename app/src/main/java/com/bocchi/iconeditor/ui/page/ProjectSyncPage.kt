@@ -67,7 +67,6 @@ fun ProjectSyncPage(
     peerHost: String,
     peerPort: String,
     peerToken: String,
-    statusMessage: String?,
     onPeerHost: (String) -> Unit,
     onPeerPort: (String) -> Unit,
     onPeerToken: (String) -> Unit,
@@ -78,6 +77,8 @@ fun ProjectSyncPage(
     onProbe: () -> Unit,
 ) {
     val context = LocalContext.current
+    val tokenClipboardLabel = stringResource(R.string.sync_peer_token)
+    val copiedTokenMessage = stringResource(R.string.copied_format, serverToken)
     val canSavePeer = peerHost.isNotBlank() &&
         peerPort.toIntOrNull()?.let { it in 1..65535 } == true &&
         peerToken.isNotBlank()
@@ -108,38 +109,40 @@ fun ProjectSyncPage(
                         if (enabled) onStartServer() else onStopServer()
                     },
                 )
-                if (serverRunning) {
-                    Text(
-                        text = stringResource(R.string.sync_token_label, serverToken),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .combinedClickable(
-                                enabled = serverToken.isNotBlank(),
-                                onClick = {},
-                                onLongClick = {
-                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE)
-                                        as ClipboardManager
-                                    clipboard.setPrimaryClip(
-                                        ClipData.newPlainText(
-                                            context.getString(R.string.sync_peer_token),
-                                            serverToken,
-                                        ),
-                                    )
-                                    Toast.makeText(
-                                        context,
-                                        context.getString(R.string.copied_format, serverToken),
-                                        Toast.LENGTH_SHORT,
-                                    ).show()
-                                },
-                            )
-                            .padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                        style = MiuixTheme.textStyles.body2,
-                    )
-                }
                 Text(
-                    text = stringResource(R.string.sync_host_hint),
-                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
+                    text = if (serverRunning) {
+                        stringResource(R.string.sync_token_label, serverToken)
+                    } else {
+                        stringResource(R.string.sync_host_hint)
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .then(
+                            if (serverRunning) {
+                                Modifier.combinedClickable(
+                                    enabled = serverToken.isNotBlank(),
+                                    onClick = {},
+                                    onLongClick = {
+                                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE)
+                                            as ClipboardManager
+                                        clipboard.setPrimaryClip(
+                                            ClipData.newPlainText(
+                                                tokenClipboardLabel,
+                                                serverToken,
+                                            ),
+                                        )
+                                        Toast.makeText(
+                                            context,
+                                            copiedTokenMessage,
+                                            Toast.LENGTH_SHORT,
+                                        ).show()
+                                    },
+                                )
+                            } else {
+                                Modifier
+                            },
+                        )
+                        .padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     style = MiuixTheme.textStyles.body2,
                 )
@@ -184,15 +187,6 @@ fun ProjectSyncPage(
             }
         }
 
-        if (!statusMessage.isNullOrBlank()) {
-            item {
-                Text(
-                    text = statusMessage,
-                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                )
-            }
-        }
         item { Spacer(Modifier.height(12.dp)) }
     }
 }

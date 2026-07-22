@@ -25,15 +25,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.calculateEndPadding
 import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.asPaddingValues
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -44,17 +38,14 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.IntOffset
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation3.runtime.NavEntry
 import androidx.navigation3.runtime.rememberNavBackStack
@@ -89,7 +80,6 @@ import com.bocchi.iconeditor.ui.component.rememberMiuixBlurBackdrop
 import com.bocchi.iconeditor.ui.component.rootScreenIndex
 import com.bocchi.iconeditor.ui.component.withPageMargins
 import com.bocchi.iconeditor.ui.navigation.PredictiveNavDisplay
-import com.bocchi.iconeditor.ui.locale.ensureInitialAppLanguage
 import com.bocchi.iconeditor.ui.page.AboutPage
 import com.bocchi.iconeditor.ui.page.IconEditPage
 import com.bocchi.iconeditor.ui.page.InfoEditPage
@@ -104,16 +94,12 @@ import kotlinx.coroutines.launch
 import com.bocchi.iconeditor.ui.component.displayName
 import com.bocchi.iconeditor.ui.component.ExportProgressOverlay
 import com.bocchi.iconeditor.ui.component.ImportProgressOverlay
-import top.yukonga.miuix.kmp.basic.FloatingActionButton
-import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.ScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.blur.LayerBackdrop
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
-import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.extended.Add
 import top.yukonga.miuix.kmp.theme.ColorSchemeMode
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.ThemeController
@@ -157,7 +143,6 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         incomingProjectUri = intent.projectUri()
-        ensureInitialAppLanguage(this)
         enableEdgeToEdge()
         setContent {
             val viewModel: AppViewModel = viewModel()
@@ -217,6 +202,8 @@ private fun IconEditorApp(
     val coroutineScope = rememberCoroutineScope()
 
     val context = LocalContext.current
+    val syncScanSuccessMessage = stringResource(R.string.sync_scan_success)
+    val syncScanInvalidMessage = stringResource(R.string.sync_scan_invalid)
     LaunchedEffect(viewModel.toastMessageText) {
         val message = viewModel.toastMessageText
         if (message != null) {
@@ -294,10 +281,16 @@ private fun IconEditorApp(
     ) { result ->
         if (result.resultCode != Activity.RESULT_OK) return@rememberLauncherForActivityResult
         val raw = result.data?.getStringExtra(SyncQrScanActivity.EXTRA_RAW_VALUE).orEmpty()
-        if (!viewModel.applySyncConnectionPayload(raw)) {
+        if (viewModel.applySyncConnectionPayload(raw)) {
             Toast.makeText(
                 context,
-                context.getString(R.string.sync_scan_invalid),
+                syncScanSuccessMessage,
+                Toast.LENGTH_SHORT,
+            ).show()
+        } else {
+            Toast.makeText(
+                context,
+                syncScanInvalidMessage,
                 Toast.LENGTH_SHORT,
             ).show()
         }
@@ -449,14 +442,13 @@ private fun IconEditorApp(
                                         importLauncher.launch(ProjectImportMimeTypes.toTypedArray())
                                     },
                                     onSelectRoot = ::selectRoot,
-                                    projectsPage = { contentPadding, onImportFabVisibilityChanged ->
+                                    projectsPage = { contentPadding ->
                                         ProjectsPage(
                                             projects = viewModel.projects,
                                             metadata = viewModel.projectMetadata,
                                             sortField = viewModel.settings.projectSortField,
                                             contentPadding = contentPadding.withPageMargins(),
                                             scrollToTopRequest = viewModel.projectsScrollToTopRequest,
-                                            onImportFabVisibilityChanged = onImportFabVisibilityChanged,
                                             onEditInfo = {
                                                 infoTab = InfoTab.Mtz
                                                 viewModel.loadProject(it.id, loadIcons = false)
@@ -642,7 +634,6 @@ private fun IconEditorApp(
                                         peerHost = viewModel.syncPeerHost,
                                         peerPort = viewModel.syncPeerPort,
                                         peerToken = viewModel.syncPeerToken,
-                                        statusMessage = viewModel.syncStatusMessage,
                                         onPeerHost = { viewModel.syncPeerHost = it },
                                         onPeerPort = { viewModel.syncPeerPort = it },
                                         onPeerToken = { viewModel.syncPeerToken = it },
@@ -667,6 +658,7 @@ private fun IconEditorApp(
                                 ) { contentPadding ->
                                     TrashPage(
                                         entries = viewModel.trashEntries,
+                                        metadata = viewModel.trashMetadata,
                                         contentPadding = contentPadding.withPageMargins(horizontal = 0.dp),
                                         onRestore = viewModel::restoreTrashProject,
                                         onPurge = viewModel::purgeTrashProject,
@@ -914,7 +906,7 @@ private fun RootScene(
     onCreateProject: () -> Unit,
     onImportProject: () -> Unit,
     onSelectRoot: (Screen) -> Unit,
-    projectsPage: @Composable (PaddingValues, (Boolean) -> Unit) -> Unit,
+    projectsPage: @Composable (PaddingValues) -> Unit,
     settingsPage: @Composable (PaddingValues) -> Unit,
 ) {
     val hasBottomBar = !useNavigationRail
@@ -923,18 +915,6 @@ private fun RootScene(
     } else {
         Screen.Projects
     }
-    var rootPagerWidthPx by remember { mutableIntStateOf(0) }
-    var importFabVisible by remember { mutableStateOf(true) }
-    val importFabOffset by animateDpAsState(
-        targetValue = if (importFabVisible) {
-            0.dp
-        } else {
-            180.dp + WindowInsets.systemBars.asPaddingValues().calculateBottomPadding()
-        },
-        animationSpec = tween(durationMillis = 350),
-        label = "project-import-fab-offset",
-    )
-
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         bottomBar = {
@@ -982,7 +962,6 @@ private fun RootScene(
                         pageBackground = pageBackground,
                         floatingBottomBar = settings.floatingBottomBar,
                         floatingBackdrop = floatingBackdrop,
-                        onWidthChanged = { rootPagerWidthPx = it },
                         projectsPage = {
                             RootTopBarPage(
                                 screen = Screen.Projects,
@@ -992,12 +971,9 @@ private fun RootScene(
                                 onIconPreferences = onIconPreferences,
                                 onSettings = onSettings,
                                 onCreateProject = onCreateProject,
+                                onImportProject = onImportProject,
                                 bottomContentPadding = bottomContentPadding,
-                                content = { contentPadding ->
-                                    projectsPage(contentPadding) { visible ->
-                                        importFabVisible = visible
-                                    }
-                                },
+                                content = projectsPage,
                             )
                         },
                         settingsPage = {
@@ -1016,27 +992,6 @@ private fun RootScene(
                     )
                 }
             }
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(end = 12.dp, bottom = bottomContentPadding + 12.dp),
-            ) {
-                FloatingActionButton(
-                    modifier = Modifier
-                        .offset { IntOffset(x = 0, y = importFabOffset.roundToPx()) }
-                        .graphicsLayer {
-                            val projectPageOffset = pagerState.currentPage + pagerState.currentPageOffsetFraction
-                            translationX = -projectPageOffset * rootPagerWidthPx
-                        },
-                    onClick = onImportProject,
-                ) {
-                    Icon(
-                        imageVector = MiuixIcons.Demibold.Add,
-                        tint = Color.White,
-                        contentDescription = stringResource(R.string.action_import_project),
-                    )
-                }
-            }
         }
     }
 }
@@ -1050,6 +1005,7 @@ private fun RootTopBarPage(
     onIconPreferences: (IconPreferences) -> Unit,
     onSettings: (AppSettings) -> Unit,
     onCreateProject: () -> Unit,
+    onImportProject: () -> Unit = {},
     bottomContentPadding: Dp,
     content: @Composable (PaddingValues) -> Unit,
 ) {
@@ -1066,6 +1022,7 @@ private fun RootTopBarPage(
                 scrollBehavior = scrollBehavior,
                 onBack = {},
                 onCreateProject = onCreateProject,
+                onImportProject = onImportProject,
                 iconPreferences = iconPreferences,
                 onIconPreferences = onIconPreferences,
                 projectSortField = settings.projectSortField,

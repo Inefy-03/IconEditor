@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.calculateEndPadding
 import androidx.compose.foundation.layout.calculateStartPadding
@@ -29,14 +30,19 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.bocchi.iconeditor.R
+import com.bocchi.iconeditor.model.ProjectMetadata
 import com.bocchi.iconeditor.model.TrashEntry
 import com.bocchi.iconeditor.ui.component.EmptyState
+import com.bocchi.iconeditor.ui.component.label
 import top.yukonga.miuix.kmp.basic.Button
 import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.HorizontalDivider
+import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Delete
+import top.yukonga.miuix.kmp.icon.extended.Reset
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
@@ -47,6 +53,7 @@ import java.util.Date
 @Composable
 fun TrashPage(
     entries: List<TrashEntry>,
+    metadata: Map<String, ProjectMetadata>,
     contentPadding: PaddingValues = PaddingValues(top = 12.dp, bottom = 12.dp),
     onRestore: (String) -> Unit,
     onPurge: (String) -> Unit,
@@ -124,20 +131,39 @@ fun TrashPage(
                     }
                 } else {
                     items(entries, key = { it.project.id }) { entry ->
+                        val displayTitle = projectDisplayTitle(
+                            entry.project,
+                            metadata[entry.project.id] ?: ProjectMetadata(),
+                        )
                         Card(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 12.dp),
-                            insideMargin = PaddingValues(16.dp),
+                            insideMargin = PaddingValues(0.dp),
                         ) {
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text(
-                                    entry.project.name,
-                                    style = MiuixTheme.textStyles.title4,
-                                    fontWeight = FontWeight.Medium,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
+                            Column(
+                                modifier = Modifier.padding(
+                                    start = 16.dp,
+                                    top = 16.dp,
+                                    end = 16.dp,
+                                    bottom = 12.dp,
+                                ),
+                                verticalArrangement = Arrangement.spacedBy(2.dp),
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Text(
+                                        text = displayTitle,
+                                        modifier = Modifier.weight(1f),
+                                        style = MiuixTheme.textStyles.title4,
+                                        fontWeight = FontWeight.Medium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    ProjectBadge(entry.project.sourceType.label())
+                                }
                                 Text(
                                     stringResource(
                                         R.string.trash_deleted_at,
@@ -146,27 +172,34 @@ fun TrashPage(
                                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                                     style = MiuixTheme.textStyles.subtitle,
                                 )
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                ) {
-                                    Button(
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .height(TrashActionHeight),
-                                        onClick = { onRestore(entry.project.id) },
-                                    ) {
-                                        Text(stringResource(R.string.action_restore))
-                                    }
-                                    Button(
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .height(TrashActionHeight),
-                                        onClick = { purgeTarget = entry },
-                                    ) {
-                                        Text(stringResource(R.string.action_purge))
-                                    }
-                                }
+                            }
+
+                            HorizontalDivider(
+                                modifier = Modifier.padding(horizontal = 16.dp),
+                                thickness = 1.dp,
+                                color = MiuixTheme.colorScheme.outline.copy(alpha = 0.45f),
+                            )
+
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 16.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                ProjectActionButton(
+                                    imageVector = MiuixIcons.Reset,
+                                    contentDescription = stringResource(R.string.action_restore),
+                                    label = stringResource(R.string.action_restore),
+                                    onClick = { onRestore(entry.project.id) },
+                                )
+                                Spacer(Modifier.weight(1f))
+                                ProjectActionButton(
+                                    imageVector = MiuixIcons.Delete,
+                                    contentDescription = stringResource(R.string.action_purge),
+                                    danger = true,
+                                    label = stringResource(R.string.action_purge),
+                                    onClick = { purgeTarget = entry },
+                                )
                             }
                         }
                     }

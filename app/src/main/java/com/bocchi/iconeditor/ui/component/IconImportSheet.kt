@@ -99,9 +99,9 @@ fun IconImportConfirmDialog(
                     text = stringResource(
                         R.string.icon_import_summary,
                         current.totalIncoming,
-                        current.conflictCount,
-                        current.newCount,
                         current.selectedCount,
+                        current.newCount,
+                        current.conflictCount,
                     ),
                     style = MiuixTheme.textStyles.subtitle,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
